@@ -1,0 +1,13 @@
+<?php
+
+namespace {{ namespace }};
+
+use Jtargosz\ActionOtp\Contracts\VerifiableAction;
+
+class {{ class }} implements VerifiableAction
+{
+    public function handle(): mixed
+    {
+        return null;
+    }
+}

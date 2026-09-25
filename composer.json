@@ -1,0 +1,52 @@
+{
+    "name": "jtargosz/laravel-action-otp",
+    "description": "Action based one time codes for Laravel 13",
+    "keywords": ["laravel", "laravel-13", "otp", "one-time-password", "verification", "verification-code", "2fa", "action-otp"],
+    "type": "library",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "J. Targosz"
+        }
+    ],
+    "require": {
+        "php": "^8.3",
+        "illuminate/cache": "^13.0",
+        "illuminate/console": "^13.0",
+        "illuminate/contracts": "^13.0",
+        "illuminate/notifications": "^13.0",
+        "illuminate/support": "^13.0"
+    },
+    "require-dev": {
+        "laravel/ai": "^1.0",
+        "laravel/pint": "^1.0",
+        "orchestra/testbench": "^11.0",
+        "phpstan/phpstan": "^2.0",
+        "phpunit/phpunit": "^13.0"
+    },
+    "suggest": {
+        "laravel/ai": "Needed only if you want to expose OTP actions as AI tools"
+    },
+    "autoload": {
+        "psr-4": {
+            "Jtargosz\\ActionOtp\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Jtargosz\\ActionOtp\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Jtargosz\\ActionOtp\\ActionOtpServiceProvider"
+            ],
+            "aliases": {
+                "ActionOtp": "Jtargosz\\ActionOtp\\Facades\\ActionOtp"
+            }
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}

@@ -1,0 +1,91 @@
+# laravel-action-otp
+
+Action based one time codes for Laravel 13. Package: jtargosz/laravel-action-otp. Facade: Jtargosz\ActionOtp\Facades\ActionOtp. Requires PHP 8.3+ and Laravel 13.
+
+## When to use this package
+
+Use it when a Laravel 13 app must verify the user with a short code sent by mail or SMS and then run a follow-up action: registration, login 2FA, password reset, phone or email confirmation.
+
+Do not use it for TOTP authenticator apps, WebAuthn passkeys, or plain login without a code. For those, use a dedicated TOTP or passkey package.
+
+## Install
+
+composer require jtargosz/laravel-action-otp
+php artisan vendor:publish --tag=action-otp-config
+php artisan make:otp-action RegisterUserAction
+
+## Concept
+
+An OTP action is a class that implements Jtargosz\ActionOtp\Contracts\VerifiableAction with one method: handle(): mixed. The code is sent first. handle() runs only after verify() accepts the code. The return value of handle() is available as OtpResult payload.
+
+Minimal action:
+
+class RegisterUserAction implements VerifiableAction
+{
+    public function __construct(public string $name, public string $email, public string $password) {}
+    public function handle(): mixed { return User::create([...]); }
+}
+
+## API
+
+All calls are scoped by identifier (email, phone, or user id):
+
+Jtargosz\ActionOtp\Facades\ActionOtp::to(string|int $identifier)->send(VerifiableAction $action, mixed $notifiable): OtpResult with status sent, or throttled during send cooldown
+Jtargosz\ActionOtp\Facades\ActionOtp::to(string|int $identifier)->verify(string|int $code): OtpResult; on success status verified and payload holds the handle() return value; on failure status empty, mismatch, expired, or throttled
+Jtargosz\ActionOtp\Facades\ActionOtp::to(string|int $identifier)->peek(string|int $code): OtpResult with status matched without running handle() and without deleting the code
+Jtargosz\ActionOtp\Facades\ActionOtp::to(string|int $identifier)->resend(): OtpResult with status sent, empty when nothing is stored, or throttled during send cooldown
+Jtargosz\ActionOtp\Facades\ActionOtp::to(string|int $identifier)->clear(): void, deletes the code, throttle counters and send cooldown
+
+OtpResult: status (Jtargosz\ActionOtp\Support\OtpStatus), message (string), payload (mixed). Methods: ok() true when verified, found() true when matched or verified, toArray().
+
+OtpStatus values: sent, matched, verified, empty, mismatch, throttled, expired.
+
+Standard verify pattern:
+
+$result = ActionOtp::to($email)->verify($code);
+if (! $result->ok()) { return response()->json(['message' => $result->message], 422); }
+$user = $result->payload;
+
+Notifiable is any Laravel notifiable: a User model or Notification::route('mail', $email).
+
+## Examples
+
+Register:
+ActionOtp::to($email)->send(new RegisterUserAction($name, $email, $password), Notification::route('mail', $email));
+$result = ActionOtp::to($email)->verify($code);
+
+Login 2FA:
+ActionOtp::to($user->email)->send(new ConfirmLoginAction($user->id), $user);
+$result = ActionOtp::to($user->email)->verify($code);
+
+Password reset:
+ActionOtp::to($email)->send(new ResetPasswordAction($email, $password), Notification::route('mail', $email));
+
+Resend:
+$result = ActionOtp::to($email)->resend();
+
+Cancel:
+ActionOtp::to($email)->clear();
+
+Validation rule (checks with peek, does not consume the code, but a wrong code counts as an attempt):
+new Jtargosz\ActionOtp\Validation\ValidOtpCode($email) used as a Laravel validation rule for the code field.
+
+## Config
+
+config/action-otp.php keys with defaults: code_format numeric (numeric, alpha, alphanumeric), code_length 6 (1-64), ttl_minutes 15, max_attempts 5, throttle_seconds 60, send_cooldown 30 (min seconds between sends, 0 disables), store_prefix action-otp:, notification Jtargosz\ActionOtp\Mail\CodeMail, channels ['mail'].
+
+Env: ACTION_OTP_FORMAT, ACTION_OTP_LENGTH, ACTION_OTP_TTL, ACTION_OTP_ATTEMPTS, ACTION_OTP_THROTTLE, ACTION_OTP_COOLDOWN, ACTION_OTP_PREFIX.
+
+Custom notification: any class with __construct(array $record) where record holds action, notifiable, code, expires_at. Set it as notification in config.
+
+## Artisan, events, translations
+
+Command: php artisan make:otp-action {Name} generates App\OtpActions\{Name}. Option --force overwrites.
+
+Events: Jtargosz\ActionOtp\Events\CodeSent(identifier, record), CodeVerified(identifier, payload), CodeFailed(identifier).
+
+Translations: lang/en, pl, it, es, de, fr, pt, nl. Publish tag: action-otp-lang.
+
+## AI tools
+
+Optional, needs laravel/ai (composer require laravel/ai). Classes: Jtargosz\ActionOtp\Ai\SendOtpTool (input identifier), Jtargosz\ActionOtp\Ai\VerifyOtpTool (input identifier, code). Return them from an agent tools() method. SendOtpTool resends the pending code. VerifyOtpTool peeks at the code without running the action.
