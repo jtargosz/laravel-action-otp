@@ -240,6 +240,9 @@ class CodeManager implements ManagesCodes
         return $lock;
     }
 
+    /**
+     * @return array{action: mixed, notifiable: mixed, code: string, expires_at: DateTimeInterface}
+     */
     protected function freshRecord(mixed $action, mixed $notifiable): array
     {
         return [
@@ -253,9 +256,12 @@ class CodeManager implements ManagesCodes
         ];
     }
 
+    /**
+     * @param  array{action: mixed, notifiable: mixed, code: string, expires_at: DateTimeInterface}  $record
+     */
     protected function transmit(array $record): OtpResult
     {
-        /** @var class-string<Notification> $notification */
+        /** @var class-string $notification */
         $notification = (string) config('action-otp.notification');
 
         $record['notifiable']->notify(new $notification($record));
@@ -268,7 +274,7 @@ class CodeManager implements ManagesCodes
 
     protected function assertTransmittable(mixed $notifiable): void
     {
-        /** @var class-string<Notification> $notification */
+        /** @var class-string $notification */
         $notification = (string) config('action-otp.notification');
 
         if (! is_a($notification, Notification::class, true)) {

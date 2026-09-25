@@ -11,8 +11,14 @@ class CodeMail extends Notification implements ShouldQueue
 {
     use Queueable;
 
+    /**
+     * @param  array{action: mixed, notifiable: mixed, code: string, expires_at: \DateTimeInterface}  $record
+     */
     public function __construct(protected array $record) {}
 
+    /**
+     * @return array<int, string>
+     */
     public function via(object $notifiable): array
     {
         return (array) config('action-otp.channels', ['mail']);

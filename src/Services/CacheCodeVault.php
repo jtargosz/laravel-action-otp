@@ -22,11 +22,17 @@ class CacheCodeVault implements StoresCodes
         return $clone;
     }
 
+    /**
+     * @param  array{action: mixed, notifiable: mixed, code: string, expires_at: \DateTimeInterface}  $record
+     */
     public function put(array $record): void
     {
         Cache::put($this->key(), $record, $record['expires_at']);
     }
 
+    /**
+     * @return array{action: mixed, notifiable: mixed, code: string, expires_at: \DateTimeInterface}|null
+     */
     public function get(): ?array
     {
         $record = Cache::get($this->key());

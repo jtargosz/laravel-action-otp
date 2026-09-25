@@ -21,6 +21,9 @@ final class OtpResult
             || $this->status === OtpStatus::Verified;
     }
 
+    /**
+     * @return array{status: string, message: string, payload: mixed}
+     */
     public function toArray(): array
     {
         return [
