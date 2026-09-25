@@ -283,6 +283,7 @@ File `config/action-otp.php`:
 | `code_format` | `numeric` | `numeric`, `alpha` or `alphanumeric` |
 | `code_length` | `6` | Code length |
 | `ttl_minutes` | `15` | Code lifetime |
+| `expired_grace_minutes` | `5` | How long an expired code stays readable as `expired` (0 disables) |
 | `max_attempts` | `5` | Wrong tries before lock |
 | `throttle_seconds` | `60` | Lock duration (0 disables the lock) |
 | `send_cooldown` | `30` | Min seconds between sends (0 disables) |
@@ -290,7 +291,7 @@ File `config/action-otp.php`:
 | `notification` | `CodeMail::class` | Notification class |
 | `channels` | `['mail']` | Delivery channels |
 
-Env keys: `ACTION_OTP_FORMAT`, `ACTION_OTP_LENGTH`, `ACTION_OTP_TTL`, `ACTION_OTP_ATTEMPTS`, `ACTION_OTP_THROTTLE`, `ACTION_OTP_COOLDOWN`, `ACTION_OTP_PREFIX`.
+Env keys: `ACTION_OTP_FORMAT`, `ACTION_OTP_LENGTH`, `ACTION_OTP_TTL`, `ACTION_OTP_GRACE`, `ACTION_OTP_ATTEMPTS`, `ACTION_OTP_THROTTLE`, `ACTION_OTP_COOLDOWN`, `ACTION_OTP_PREFIX`.
 
 ## Notifications
 

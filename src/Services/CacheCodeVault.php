@@ -27,7 +27,13 @@ class CacheCodeVault implements StoresCodes
      */
     public function put(array $record): void
     {
-        Cache::put($this->key(), $record, $record['expires_at']);
+        $grace = max(0, (int) config('action-otp.expired_grace_minutes', 5));
+
+        Cache::put(
+            $this->key(),
+            $record,
+            (clone $record['expires_at'])->addMinutes($grace)
+        );
     }
 
     /**

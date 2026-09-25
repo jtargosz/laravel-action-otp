@@ -9,6 +9,8 @@ return [
 
     'ttl_minutes' => (int) env('ACTION_OTP_TTL', 15),
 
+    'expired_grace_minutes' => (int) env('ACTION_OTP_GRACE', 5),
+
     'max_attempts' => (int) env('ACTION_OTP_ATTEMPTS', 5),
 
     'throttle_seconds' => (int) env('ACTION_OTP_THROTTLE', 60),

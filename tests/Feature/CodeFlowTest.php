@@ -3,6 +3,7 @@
 namespace Jtargosz\ActionOtp\Tests\Feature;
 
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Notification;
 use Jtargosz\ActionOtp\Contracts\StoresCodes;
 use Jtargosz\ActionOtp\Contracts\VerifiableAction;
@@ -10,6 +11,7 @@ use Jtargosz\ActionOtp\Exceptions\MissingIdentifier;
 use Jtargosz\ActionOtp\Facades\ActionOtp;
 use Jtargosz\ActionOtp\Support\OtpStatus;
 use Jtargosz\ActionOtp\Tests\TestCase;
+use RuntimeException;
 
 class ConfirmLoginAction implements VerifiableAction
 {
@@ -180,8 +182,10 @@ class CodeFlowTest extends TestCase
 
     public function test_malformed_record_fails_closed(): void
     {
-        app(StoresCodes::class)
-            ->scope('junk@example.com')->put(['broken' => true]);
+        $key = (string) config('action-otp.store_prefix', 'action-otp:')
+            .hash('sha256', 'junk@example.com');
+
+        Cache::put($key, ['broken' => true], 60);
 
         $this->assertSame(
             OtpStatus::Empty,

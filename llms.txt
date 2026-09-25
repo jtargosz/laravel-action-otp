@@ -72,9 +72,9 @@ new Jtargosz\ActionOtp\Validation\ValidOtpCode($email) used as a Laravel validat
 
 ## Config
 
-config/action-otp.php keys with defaults: code_format numeric (numeric, alpha, alphanumeric), code_length 6 (1-64), ttl_minutes 15, max_attempts 5, throttle_seconds 60, send_cooldown 30 (min seconds between sends, 0 disables), store_prefix action-otp:, notification Jtargosz\ActionOtp\Mail\CodeMail, channels ['mail'].
+config/action-otp.php keys with defaults: code_format numeric (numeric, alpha, alphanumeric), code_length 6 (1-64), ttl_minutes 15, expired_grace_minutes 5 (keeps expired codes readable as expired, 0 disables), max_attempts 5, throttle_seconds 60, send_cooldown 30 (min seconds between sends, 0 disables), store_prefix action-otp:, notification Jtargosz\ActionOtp\Mail\CodeMail, channels ['mail'].
 
-Env: ACTION_OTP_FORMAT, ACTION_OTP_LENGTH, ACTION_OTP_TTL, ACTION_OTP_ATTEMPTS, ACTION_OTP_THROTTLE, ACTION_OTP_COOLDOWN, ACTION_OTP_PREFIX.
+Env: ACTION_OTP_FORMAT, ACTION_OTP_LENGTH, ACTION_OTP_TTL, ACTION_OTP_GRACE, ACTION_OTP_ATTEMPTS, ACTION_OTP_THROTTLE, ACTION_OTP_COOLDOWN, ACTION_OTP_PREFIX.
 
 Custom notification: any class with __construct(array $record) where record holds action, notifiable, code, expires_at. Set it as notification in config.
 
