@@ -303,6 +303,8 @@ public function __construct(protected array $record)
 
 Record keys: `action`, `notifiable`, `code`, `expires_at`. Your class can send mail, SMS or push.
 
+Keep actions serializable. Most cache drivers serialize records, so avoid closures in action properties. If the action holds an Eloquent model, use the `SerializesModels` trait so `handle()` works on fresh data.
+
 <details>
 <summary>SMS example with Vonage</summary>
 

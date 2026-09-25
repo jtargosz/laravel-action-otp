@@ -12,7 +12,9 @@ class CacheCodeVault implements StoresCodes
 
     public function scope(string $identifier): static
     {
-        if (trim($identifier) === '') {
+        $identifier = trim($identifier);
+
+        if ($identifier === '') {
             throw new MissingIdentifier('Identifier is empty.');
         }
 
