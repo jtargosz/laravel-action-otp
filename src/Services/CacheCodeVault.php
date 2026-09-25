@@ -2,6 +2,7 @@
 
 namespace Jtargosz\ActionOtp\Services;
 
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Jtargosz\ActionOtp\Contracts\StoresCodes;
 use Jtargosz\ActionOtp\Exceptions\MissingIdentifier;
@@ -31,11 +32,9 @@ class CacheCodeVault implements StoresCodes
     {
         $grace = max(0, (int) config('action-otp.expired_grace_minutes', 5));
 
-        Cache::put(
-            $this->key(),
-            $record,
-            (clone $record['expires_at'])->addMinutes($grace)
-        );
+        $ttl = $record['expires_at']->getTimestamp() - Carbon::now()->getTimestamp() + $grace * 60;
+
+        Cache::put($this->key(), $record, max(60, $ttl));
     }
 
     /**
