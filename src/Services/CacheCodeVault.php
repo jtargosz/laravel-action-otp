@@ -31,7 +31,7 @@ class CacheCodeVault implements StoresCodes
     }
 
     /**
-     * @return array{action: mixed, notifiable: mixed, code: string, expires_at: \DateTimeInterface}|null
+     * @return array<string, mixed>|null
      */
     public function get(): ?array
     {
