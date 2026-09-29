@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.0 - 2026-09-29
+
+- Added `expired_grace_minutes` config (`ACTION_OTP_GRACE`, default 5): expired codes stay readable as `expired` instead of `empty`
+- Fixed cache TTL computation to keep records through the grace period (min 60s)
+- Unified identifier trimming in `CacheCodeVault::scope()`
+- Documented action serializability (`SerializesModels` for Eloquent models) and added `SECURITY.md`
+- Widened PHPUnit to `^11.0|^12.0|^13.0`, added PHPStan array shapes, CI checkout v5, Dependabot for composer and actions
+
 ## 1.0.0 - 2026-09-25
 
 - First release for Laravel 13 and PHP 8.3
