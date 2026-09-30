@@ -2,11 +2,13 @@
 
 namespace Jtargosz\ActionOtp\Facades;
 
+use Closure;
 use Illuminate\Support\Facades\Facade;
 use Jtargosz\ActionOtp\Contracts\GeneratesCodes;
 use Jtargosz\ActionOtp\Contracts\ManagesCodes;
 use Jtargosz\ActionOtp\Contracts\StoresCodes;
 use Jtargosz\ActionOtp\Contracts\VerifiableAction;
+use Jtargosz\ActionOtp\Http\RouteRegistrar;
 use Jtargosz\ActionOtp\Services\CodeManager;
 use Jtargosz\ActionOtp\Services\SessionChallenges;
 use Jtargosz\ActionOtp\Services\Throttle;
@@ -39,6 +41,45 @@ use Jtargosz\ActionOtp\Testing\FixedCodeGenerator;
  */
 class ActionOtp extends Facade
 {
+    /**
+     * Registers the optional routes: verify, resend, magic link and the
+     * otp.confirm pages. Call it from a routes file.
+     *
+     * @param  array<int, string>  $middleware  "web" for session based apps, e.g. ["api"] for token clients
+     */
+    public static function routes(string $prefix = 'otp', array $middleware = ['web']): void
+    {
+        RouteRegistrar::register(app('router'), $prefix, $middleware);
+    }
+
+    /**
+     * View for the magic link page. A string is a view name, a callable gets
+     * (Request $request, array $data). Data: url (POST target), purpose.
+     */
+    public static function linkView(string|Closure $view): void
+    {
+        app()->instance('action-otp.view.link', $view);
+    }
+
+    /**
+     * View for the otp.confirm page. Data: submitUrl, resendUrl.
+     */
+    public static function confirmView(string|Closure $view): void
+    {
+        app()->instance('action-otp.view.confirm', $view);
+    }
+
+    /**
+     * Picks the identifier for otp.confirm from the authenticated user.
+     * Default: getEmailForVerification(), then getAuthIdentifier().
+     *
+     * @param  Closure(object): (string|int)  $resolver
+     */
+    public static function confirmUsing(Closure $resolver): void
+    {
+        app()->instance('action-otp.confirm.identifier', $resolver);
+    }
+
     /**
      * Swaps the manager for a fake that records sends instead of delivering
      * them. Pass a code to make every send use it.

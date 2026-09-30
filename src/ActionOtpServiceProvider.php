@@ -2,11 +2,17 @@
 
 namespace Jtargosz\ActionOtp;
 
+use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use Jtargosz\ActionOtp\Console\MakeOtpActionCommand;
 use Jtargosz\ActionOtp\Contracts\GeneratesCodes;
 use Jtargosz\ActionOtp\Contracts\ManagesCodes;
 use Jtargosz\ActionOtp\Contracts\StoresCodes;
+use Jtargosz\ActionOtp\Contracts\VerifyResponse;
+use Jtargosz\ActionOtp\Http\Middleware\RequireOtpConfirmation;
+use Jtargosz\ActionOtp\Http\Responses\DefaultVerifyResponse;
 use Jtargosz\ActionOtp\Services\CacheCodeVault;
 use Jtargosz\ActionOtp\Services\CodeManager;
 use Jtargosz\ActionOtp\Services\SecureCodeGenerator;
@@ -35,12 +41,20 @@ class ActionOtpServiceProvider extends ServiceProvider
 
         $this->app->alias('action-otp', CodeManager::class);
         $this->app->alias('action-otp', ManagesCodes::class);
+
+        $this->app->singletonIf(VerifyResponse::class, DefaultVerifyResponse::class);
     }
 
     public function boot(): void
     {
         $this->loadTranslationsFrom(__DIR__.'/../lang', 'action-otp');
         $this->loadViewsFrom(__DIR__.'/../resources/views', 'action-otp');
+
+        RateLimiter::for('action-otp', fn (Request $request) => Limit::perMinute(
+            max(1, (int) config('action-otp.rate_limit', 10))
+        )->by('action-otp|'.$request->ip()));
+
+        $this->app['router']->aliasMiddleware('otp.confirm', RequireOtpConfirmation::class);
 
         if ($this->app->runningInConsole()) {
             $this->publishes([

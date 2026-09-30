@@ -2,6 +2,7 @@
 
 namespace Jtargosz\ActionOtp\Tests\Fixtures;
 
+use Illuminate\Http\JsonResponse;
 use Jtargosz\ActionOtp\Attributes\AnyDevice;
 use Jtargosz\ActionOtp\Attributes\CodeFormat;
 use Jtargosz\ActionOtp\Attributes\CodeLength;
@@ -83,6 +84,14 @@ class SmsAction implements VerifiableAction
     public function handle(): mixed
     {
         return 'sms';
+    }
+}
+
+class ResponseAction implements VerifiableAction
+{
+    public function handle(): mixed
+    {
+        return new JsonResponse(['custom' => true], 201);
     }
 }
 
