@@ -103,7 +103,7 @@ class RegisterUserAction implements VerifiableAction
     public function __construct(
         public string $name,
         public string $email,
-        public string $password,
+        public string $passwordHash,
     ) {
     }
 
@@ -112,16 +112,19 @@ class RegisterUserAction implements VerifiableAction
         return User::create([
             'name' => $this->name,
             'email' => $this->email,
-            'password' => Hash::make($this->password),
+            'password' => $this->passwordHash,
         ]);
     }
 }
 ```
 
+The action waits in cache until the code is verified, so hash the password before you build it. Never keep a plain password in an action.
+
 Send the code:
 
 ```php
 use App\OtpActions\RegisterUserAction;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Notification;
 use Jtargosz\ActionOtp\Facades\ActionOtp;
 
@@ -133,7 +136,7 @@ Route::post('/register', function (Request $request) {
     ]);
 
     ActionOtp::to($data['email'])->send(
-        new RegisterUserAction($data['name'], $data['email'], $data['password']),
+        new RegisterUserAction($data['name'], $data['email'], Hash::make($data['password'])),
         Notification::route('mail', $data['email'])
     );
 
@@ -170,11 +173,11 @@ Every call starts with `to()`, which scopes the code to one identifier (email, p
 
 | Call | What it does | Returns |
 | --- | --- | --- |
-| `send($action, $notifiable)` | Stores the action, generates a code, sends the notification. Replaces any pending code for the identifier | `sent`, or `throttled` during cooldown |
+| `send($action, $notifiable)` | Stores the action, generates a code, sends the notification. Replaces any pending code for the identifier | `sent`, or `throttled` during cooldown or lockout |
 | `verify($code)` | Checks the code, runs `handle()` once, deletes the code | `verified` + `payload`, or `mismatch`, `empty`, `expired`, `throttled` |
 | `peek($code)` | Checks the code without running `handle()` and without deleting it | `matched`, `mismatch`, `empty`, `expired`, `throttled` |
-| `resend()` | Generates a new code for the stored action and sends it again | `sent`, `empty` or `throttled` |
-| `clear()` | Deletes the code, throttle counters and send cooldown | void |
+| `resend()` | Generates a new code for the stored action and sends it again | `sent`, `empty`, or `throttled` during cooldown or lockout |
+| `clear()` | Deletes the pending code. Attempt counters, lockout and send cooldown stay | void |
 
 The result object:
 
@@ -214,21 +217,21 @@ use Jtargosz\ActionOtp\Contracts\VerifiableAction;
 
 class ResetPasswordAction implements VerifiableAction
 {
-    public function __construct(public string $email, public string $password)
+    public function __construct(public string $email, public string $passwordHash)
     {
     }
 
     public function handle(): mixed
     {
         $user = User::where('email', $this->email)->firstOrFail();
-        $user->update(['password' => Hash::make($this->password)]);
+        $user->update(['password' => $this->passwordHash]);
 
         return $user;
     }
 }
 
 ActionOtp::to($email)->send(
-    new ResetPasswordAction($email, $password),
+    new ResetPasswordAction($email, Hash::make($password)),
     Notification::route('mail', $email)
 );
 ```
@@ -303,6 +306,8 @@ public function __construct(protected array $record)
 
 Record keys: `action`, `notifiable`, `code`, `expires_at`. Your class can send mail, SMS or push.
 
+A queued notification is serialized into the queue payload, and into `failed_jobs` when it fails. The default `CodeMail` keeps only `code` and `expires_at` from the record and implements `ShouldBeEncrypted`. If your notification implements `ShouldQueue`, do the same: copy the fields you need in the constructor instead of storing the whole record, and add `ShouldBeEncrypted`.
+
 Keep actions serializable. Most cache drivers serialize records, so avoid closures in action properties. If the action holds an Eloquent model, use the `SerializesModels` trait so `handle()` works on fresh data.
 
 <details>
@@ -346,11 +351,13 @@ class CodeSms extends Notification
 - Codes are compared with `hash_equals`.
 - The identifier is stored as SHA-256, never plain text in the cache key.
 - Cache keys start with `store_prefix`. If several apps share one cache backend, set a unique `ACTION_OTP_PREFIX` per app, otherwise they read and overwrite each other's codes and counters.
-- After `max_attempts` wrong tries the identifier is locked for `throttle_seconds`.
+- After `max_attempts` wrong tries the identifier is locked for `throttle_seconds`. Wrong tries count per identifier over a one hour window, across codes: `send()` and `resend()` neither reset the count nor lift the lock, and they return `throttled` while locked. Once the limit is reached, each further wrong try in that window locks again. Only a successful `verify()` resets the counters, lockout and send cooldown. `clear()` and expiry delete the code but keep them, so a public "cancel" endpoint cannot be used to lift the limits.
+- `peek()` and `verify()` run under the same per-identifier lock, so parallel requests cannot slip past the attempt limit.
 - Sends are limited by `send_cooldown`. Protect your send and resend routes with Laravel rate limiting as well. The route examples in this file ship with `throttle` middleware, keep it or tighten it.
 - Statuses tell `empty` apart from `mismatch`, so a caller can probe whether an identifier has a pending code. If identifiers are sensitive in your app, put these routes behind auth or rate limiting.
 - `verify()` consumes the code under an atomic lock, so two parallel requests cannot run `handle()` twice.
-- The pending action waits in cache until verified, including any data you pass to it. Treat the cache as trusted storage, keep `ttl_minutes` short and avoid stuffing secrets you do not need.
+- The pending action waits in cache until verified, including any data you pass to it. Treat the cache as trusted storage, keep `ttl_minutes` short and avoid stuffing secrets you do not need. Hash passwords before they go into an action.
+- The default `CodeMail` never puts the action into the queue payload and is encrypted on the queue. See [Notifications](#notifications) for custom queued classes.
 - `CodeSent` carries the full record, including the action payload. If you log event payloads (Telescope does by default), exclude this event or keep secrets out of the action.
 - Expired codes are deleted on first use and return status `expired`.
 - Events `CodeSent`, `CodeVerified` and `CodeFailed` are dispatched for logs and metrics.
@@ -363,7 +370,7 @@ Use array cache and fake notifications:
 Notification::fake();
 
 ActionOtp::to('test@example.com')->send(
-    new RegisterUserAction('A', 'test@example.com', 'secret123'),
+    new RegisterUserAction('A', 'test@example.com', Hash::make('secret123')),
     Notification::route('mail', 'test@example.com')
 );
 ```
@@ -400,7 +407,7 @@ Expose these tools only to authenticated, trusted agents. A model with these too
 
 ## Translations
 
-Ships with `en`, `pl`, `it`, `es`, `de`, `fr`, `pt` and `nl`. Publish with tag `action-otp-lang` and edit as needed. To add a language, copy `lang/en/action-otp.php` to `lang/{locale}/action-otp.php` with the same keys.
+Ships with `en`, `pl`, `it`, `es`, `de`, `fr`, `pt` and `nl`. Messages follow the app locale. Publish with tag `action-otp-lang` and edit the files in `lang/vendor/action-otp/{locale}/action-otp.php`. To add a language, copy `lang/vendor/action-otp/en/action-otp.php` to `lang/vendor/action-otp/{locale}/action-otp.php` with the same keys.
 
 ## Contributing
 

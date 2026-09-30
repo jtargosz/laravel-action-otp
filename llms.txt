@@ -22,19 +22,23 @@ Minimal action:
 
 class RegisterUserAction implements VerifiableAction
 {
-    public function __construct(public string $name, public string $email, public string $password) {}
+    public function __construct(public string $name, public string $email, public string $passwordHash) {}
     public function handle(): mixed { return User::create([...]); }
 }
+
+The action waits in cache until verify(), so pass already hashed passwords (Hash::make) and never plain secrets.
 
 ## API
 
 All calls are scoped by identifier (email, phone, or user id):
 
-Jtargosz\ActionOtp\Facades\ActionOtp::to(string|int $identifier)->send(VerifiableAction $action, mixed $notifiable): OtpResult with status sent, or throttled during send cooldown
+Jtargosz\ActionOtp\Facades\ActionOtp::to(string|int $identifier)->send(VerifiableAction $action, mixed $notifiable): OtpResult with status sent, or throttled during send cooldown or attempt lockout
 Jtargosz\ActionOtp\Facades\ActionOtp::to(string|int $identifier)->verify(string|int $code): OtpResult; on success status verified and payload holds the handle() return value; on failure status empty, mismatch, expired, or throttled
 Jtargosz\ActionOtp\Facades\ActionOtp::to(string|int $identifier)->peek(string|int $code): OtpResult with status matched without running handle() and without deleting the code
-Jtargosz\ActionOtp\Facades\ActionOtp::to(string|int $identifier)->resend(): OtpResult with status sent, empty when nothing is stored, or throttled during send cooldown
-Jtargosz\ActionOtp\Facades\ActionOtp::to(string|int $identifier)->clear(): void, deletes the code, throttle counters and send cooldown
+Jtargosz\ActionOtp\Facades\ActionOtp::to(string|int $identifier)->resend(): OtpResult with status sent, empty when nothing is stored, or throttled during send cooldown or attempt lockout
+
+Wrong attempts count per identifier over a one hour window across codes. send() and resend() do not reset the count or lift the lock. Only a successful verify() resets the counters, lockout and send cooldown.
+Jtargosz\ActionOtp\Facades\ActionOtp::to(string|int $identifier)->clear(): void, deletes the pending code only; attempt counters, lockout and send cooldown stay
 
 OtpResult: status (Jtargosz\ActionOtp\Support\OtpStatus), message (string), payload (mixed). Methods: ok() true when verified, found() true when matched or verified, toArray().
 
@@ -51,7 +55,7 @@ Notifiable is any Laravel notifiable: a User model or Notification::route('mail'
 ## Examples
 
 Register:
-ActionOtp::to($email)->send(new RegisterUserAction($name, $email, $password), Notification::route('mail', $email));
+ActionOtp::to($email)->send(new RegisterUserAction($name, $email, Hash::make($password)), Notification::route('mail', $email));
 $result = ActionOtp::to($email)->verify($code);
 
 Login 2FA:
@@ -59,7 +63,7 @@ ActionOtp::to($user->email)->send(new ConfirmLoginAction($user->id), $user);
 $result = ActionOtp::to($user->email)->verify($code);
 
 Password reset:
-ActionOtp::to($email)->send(new ResetPasswordAction($email, $password), Notification::route('mail', $email));
+ActionOtp::to($email)->send(new ResetPasswordAction($email, Hash::make($password)), Notification::route('mail', $email));
 
 Resend:
 $result = ActionOtp::to($email)->resend();
@@ -76,7 +80,7 @@ config/action-otp.php keys with defaults: code_format numeric (numeric, alpha, a
 
 Env: ACTION_OTP_FORMAT, ACTION_OTP_LENGTH, ACTION_OTP_TTL, ACTION_OTP_GRACE, ACTION_OTP_ATTEMPTS, ACTION_OTP_THROTTLE, ACTION_OTP_COOLDOWN, ACTION_OTP_PREFIX.
 
-Custom notification: any class with __construct(array $record) where record holds action, notifiable, code, expires_at. Set it as notification in config.
+Custom notification: any class with __construct(array $record) where record holds action, notifiable, code, expires_at. Set it as notification in config. If it implements ShouldQueue, copy only code and expires_at in the constructor (the default CodeMail does this) and implement ShouldBeEncrypted, so the action never lands in the queue payload.
 
 ## Artisan, events, translations
 
@@ -84,7 +88,7 @@ Command: php artisan make:otp-action {Name} generates App\OtpActions\{Name}. Opt
 
 Events: Jtargosz\ActionOtp\Events\CodeSent(identifier, record), CodeVerified(identifier, payload), CodeFailed(identifier).
 
-Translations: lang/en, pl, it, es, de, fr, pt, nl. Publish tag: action-otp-lang.
+Translations: lang/en, pl, it, es, de, fr, pt, nl, following the app locale. Publish tag: action-otp-lang. App overrides live in lang/vendor/action-otp/{locale}/action-otp.php.
 
 ## AI tools
 

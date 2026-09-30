@@ -52,18 +52,19 @@ class CodeManager implements ManagesCodes
         $lock = $this->acquireSlot();
 
         if ($lock === null) {
-            return new OtpResult(OtpStatus::Throttled, __('action-otp.throttled'));
+            return new OtpResult(OtpStatus::Throttled, __('action-otp::action-otp.throttled'));
         }
 
         try {
-            if ($this->coolingDown()) {
-                return new OtpResult(OtpStatus::Throttled, __('action-otp.throttled'));
+            // A new code must not lift the lockout, otherwise anyone who can
+            // trigger a send could reset the attempt limit at will.
+            if ($this->locked() || $this->coolingDown()) {
+                return new OtpResult(OtpStatus::Throttled, __('action-otp::action-otp.throttled'));
             }
 
             $record = $this->freshRecord($action, $notifiable);
 
             $this->vault->put($record);
-            $this->resetTries();
         } finally {
             $lock->release();
         }
@@ -75,57 +76,31 @@ class CodeManager implements ManagesCodes
     {
         $this->needIdentifier();
 
-        $code = (string) $code;
+        $lock = $this->acquireSlot();
 
-        if ($this->locked()) {
-            return new OtpResult(OtpStatus::Throttled, __('action-otp.throttled'));
+        if ($lock === null) {
+            return new OtpResult(OtpStatus::Throttled, __('action-otp::action-otp.throttled'));
         }
 
-        $record = $this->vault->get();
-
-        if (! $record) {
-            return new OtpResult(OtpStatus::Empty, __('action-otp.empty'));
+        try {
+            return $this->check((string) $code);
+        } finally {
+            $lock->release();
         }
-
-        if (! isset($record['code'], $record['expires_at'])
-            || ! is_string($record['code'])
-            || ! $record['expires_at'] instanceof DateTimeInterface) {
-            $this->vault->flush();
-
-            return new OtpResult(OtpStatus::Empty, __('action-otp.empty'));
-        }
-
-        if (Carbon::now()->greaterThan($record['expires_at'])) {
-            $this->vault->flush();
-
-            return new OtpResult(OtpStatus::Expired, __('action-otp.expired'));
-        }
-
-        if (! hash_equals((string) $record['code'], $code)) {
-            $this->hit();
-
-            event(new CodeFailed($this->identifier));
-
-            return new OtpResult(OtpStatus::Mismatch, __('action-otp.mismatch'));
-        }
-
-        return new OtpResult(OtpStatus::Matched, __('action-otp.matched'));
     }
 
     public function verify(string|int $code): OtpResult
     {
         $this->needIdentifier();
 
-        $code = (string) $code;
-
         $lock = $this->acquireSlot();
 
         if ($lock === null) {
-            return new OtpResult(OtpStatus::Throttled, __('action-otp.throttled'));
+            return new OtpResult(OtpStatus::Throttled, __('action-otp::action-otp.throttled'));
         }
 
         try {
-            $check = $this->peek($code);
+            $check = $this->check((string) $code);
 
             if (! $check->found()) {
                 return $check;
@@ -136,7 +111,7 @@ class CodeManager implements ManagesCodes
             if (! isset($record['action'])) {
                 $this->vault->flush();
 
-                return new OtpResult(OtpStatus::Empty, __('action-otp.empty'));
+                return new OtpResult(OtpStatus::Empty, __('action-otp::action-otp.empty'));
             }
 
             $action = $record['action'];
@@ -144,10 +119,11 @@ class CodeManager implements ManagesCodes
             if (! is_object($action) || ! method_exists($action, 'handle')) {
                 $this->vault->flush();
 
-                return new OtpResult(OtpStatus::Empty, __('action-otp.empty'));
+                return new OtpResult(OtpStatus::Empty, __('action-otp::action-otp.empty'));
             }
 
             $this->vault->flush();
+            $this->resetThrottle();
         } finally {
             $lock->release();
         }
@@ -156,7 +132,48 @@ class CodeManager implements ManagesCodes
 
         event(new CodeVerified($this->identifier, $payload));
 
-        return new OtpResult(OtpStatus::Verified, __('action-otp.verified'), $payload);
+        return new OtpResult(OtpStatus::Verified, __('action-otp::action-otp.verified'), $payload);
+    }
+
+    /**
+     * Compares the code against the stored record. Callers must hold the slot
+     * lock, so the lockout check and the attempt counter cannot race.
+     */
+    protected function check(string $code): OtpResult
+    {
+        if ($this->locked()) {
+            return new OtpResult(OtpStatus::Throttled, __('action-otp::action-otp.throttled'));
+        }
+
+        $record = $this->vault->get();
+
+        if (! $record) {
+            return new OtpResult(OtpStatus::Empty, __('action-otp::action-otp.empty'));
+        }
+
+        if (! isset($record['code'], $record['expires_at'])
+            || ! is_string($record['code'])
+            || ! $record['expires_at'] instanceof DateTimeInterface) {
+            $this->vault->flush();
+
+            return new OtpResult(OtpStatus::Empty, __('action-otp::action-otp.empty'));
+        }
+
+        if (Carbon::now()->greaterThan($record['expires_at'])) {
+            $this->vault->flush();
+
+            return new OtpResult(OtpStatus::Expired, __('action-otp::action-otp.expired'));
+        }
+
+        if (! hash_equals((string) $record['code'], $code)) {
+            $this->hit();
+
+            event(new CodeFailed($this->identifier));
+
+            return new OtpResult(OtpStatus::Mismatch, __('action-otp::action-otp.mismatch'));
+        }
+
+        return new OtpResult(OtpStatus::Matched, __('action-otp::action-otp.matched'));
     }
 
     public function resend(): OtpResult
@@ -166,32 +183,31 @@ class CodeManager implements ManagesCodes
         $lock = $this->acquireSlot();
 
         if ($lock === null) {
-            return new OtpResult(OtpStatus::Throttled, __('action-otp.throttled'));
+            return new OtpResult(OtpStatus::Throttled, __('action-otp::action-otp.throttled'));
         }
 
         try {
             $current = $this->vault->get();
 
             if ($current === null) {
-                return new OtpResult(OtpStatus::Empty, __('action-otp.empty'));
+                return new OtpResult(OtpStatus::Empty, __('action-otp::action-otp.empty'));
             }
 
             if (! isset($current['action'], $current['notifiable'])) {
                 $this->vault->flush();
 
-                return new OtpResult(OtpStatus::Empty, __('action-otp.empty'));
+                return new OtpResult(OtpStatus::Empty, __('action-otp::action-otp.empty'));
             }
 
             $this->assertTransmittable($current['notifiable']);
 
-            if ($this->coolingDown()) {
-                return new OtpResult(OtpStatus::Throttled, __('action-otp.throttled'));
+            if ($this->locked() || $this->coolingDown()) {
+                return new OtpResult(OtpStatus::Throttled, __('action-otp::action-otp.throttled'));
             }
 
             $record = $this->freshRecord($current['action'], $current['notifiable']);
 
             $this->vault->put($record);
-            $this->resetTries();
         } finally {
             $lock->release();
         }
@@ -269,7 +285,7 @@ class CodeManager implements ManagesCodes
 
         event(new CodeSent($this->identifier, $record));
 
-        return new OtpResult(OtpStatus::Sent, __('action-otp.sent'));
+        return new OtpResult(OtpStatus::Sent, __('action-otp::action-otp.sent'));
     }
 
     protected function assertTransmittable(mixed $notifiable): void
@@ -296,12 +312,10 @@ class CodeManager implements ManagesCodes
         $key = $this->vaultKey(':tries');
         $max = (int) config('action-otp.max_attempts', 5);
 
-        $tries = Cache::has($key) ? Cache::increment($key) : false;
-
-        if ($tries === false) {
-            $tries = 1;
-            Cache::put($key, 1, 3600);
-        }
+        // add() only creates the counter (with its window) when it is missing,
+        // increment() then bumps it atomically on every cache driver.
+        Cache::add($key, 0, 3600);
+        $tries = (int) Cache::increment($key);
 
         if ($tries >= $max) {
             Cache::put(
@@ -312,10 +326,15 @@ class CodeManager implements ManagesCodes
         }
     }
 
-    protected function resetTries(): void
+    /**
+     * Only a successful verify() may reset throttling. clear(), expiry and a
+     * new send leave the counters alone.
+     */
+    protected function resetThrottle(): void
     {
         Cache::forget($this->vaultKey(':tries'));
         Cache::forget($this->vaultKey(':locked'));
+        Cache::forget($this->vaultKey(':sent_at'));
     }
 
     protected function coolingDown(): bool

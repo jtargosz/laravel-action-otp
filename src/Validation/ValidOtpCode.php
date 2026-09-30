@@ -13,7 +13,7 @@ class ValidOtpCode implements ValidationRule
     public function validate(string $attribute, mixed $value, Closure $fail): void
     {
         if (! is_string($this->identifier) && ! is_int($this->identifier)) {
-            $fail(__('action-otp.empty'));
+            $fail(__('action-otp::action-otp.empty'));
 
             return;
         }

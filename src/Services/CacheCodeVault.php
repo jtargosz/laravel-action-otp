@@ -47,12 +47,13 @@ class CacheCodeVault implements StoresCodes
         return is_array($record) ? $record : null;
     }
 
+    /**
+     * Deletes only the record. Attempt counters, lockout and send cooldown are
+     * owned by the manager and survive, so cancelling cannot reset throttling.
+     */
     public function flush(): void
     {
         Cache::forget($this->key());
-        Cache::forget($this->key().':tries');
-        Cache::forget($this->key().':locked');
-        Cache::forget($this->key().':sent_at');
     }
 
     protected function key(): string
