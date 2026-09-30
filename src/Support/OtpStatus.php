@@ -11,4 +11,5 @@ enum OtpStatus: string
     case Mismatch = 'mismatch';
     case Throttled = 'throttled';
     case Expired = 'expired';
+    case DeviceMismatch = 'device_mismatch';
 }

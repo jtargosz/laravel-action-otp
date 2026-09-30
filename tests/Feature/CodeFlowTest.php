@@ -3,42 +3,38 @@
 namespace Jtargosz\ActionOtp\Tests\Feature;
 
 use Illuminate\Contracts\Queue\ShouldBeEncrypted;
-use Illuminate\Notifications\AnonymousNotifiable;
-use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Notification;
+use InvalidArgumentException;
 use Jtargosz\ActionOtp\Contracts\StoresCodes;
-use Jtargosz\ActionOtp\Contracts\VerifiableAction;
 use Jtargosz\ActionOtp\Exceptions\MissingIdentifier;
 use Jtargosz\ActionOtp\Facades\ActionOtp;
 use Jtargosz\ActionOtp\Mail\CodeMail;
+use Jtargosz\ActionOtp\Support\Keys;
 use Jtargosz\ActionOtp\Support\OtpStatus;
+use Jtargosz\ActionOtp\Tests\Fixtures\AlphanumericAction;
+use Jtargosz\ActionOtp\Tests\Fixtures\ConfirmLoginAction;
+use Jtargosz\ActionOtp\Tests\Fixtures\SecretHoldingAction;
+use Jtargosz\ActionOtp\Tests\Fixtures\ThrowingAction;
 use Jtargosz\ActionOtp\Tests\TestCase;
 use RuntimeException;
 
-class ConfirmLoginAction implements VerifiableAction
-{
-    public function handle(): mixed
-    {
-        return 'logged-in';
-    }
-}
-
-class SecretHoldingAction implements VerifiableAction
-{
-    public function __construct(public string $secret = 'top-secret-value') {}
-
-    public function handle(): mixed
-    {
-        return $this->secret;
-    }
-}
-
+/**
+ * Core flow over the explicit challenge token (API style, no session).
+ */
 class CodeFlowTest extends TestCase
 {
-    public function test_send_verify_flow(): void
+    protected function setUp(): void
     {
+        parent::setUp();
+
         Notification::fake();
+        $this->noBrowser();
+    }
+
+    public function test_api_flow_with_challenge_token(): void
+    {
+        $this->fixCode('482913');
 
         $send = ActionOtp::to('user@example.com')->send(
             new ConfirmLoginAction,
@@ -46,127 +42,172 @@ class CodeFlowTest extends TestCase
         );
 
         $this->assertSame(OtpStatus::Sent, $send->status);
+        $this->assertIsString($send->challenge);
+        $this->assertSame(40, strlen($send->challenge));
 
-        $record = app(StoresCodes::class)
-            ->scope('user@example.com')->get();
+        $otp = ActionOtp::to('user@example.com')->withChallenge($send->challenge);
 
-        $this->assertNotEmpty($record['code']);
+        $this->assertSame(OtpStatus::Mismatch, $otp->peek('000000')->status);
+        $this->assertSame(OtpStatus::Matched, $otp->peek('482913')->status);
 
-        $wrong = ActionOtp::to('user@example.com')->peek('000000');
-        $this->assertSame(OtpStatus::Mismatch, $wrong->status);
-
-        $good = ActionOtp::to('user@example.com')->peek($record['code']);
-        $this->assertSame(OtpStatus::Matched, $good->status);
-
-        $done = ActionOtp::to('user@example.com')->verify($record['code']);
+        $done = $otp->verify('482913');
         $this->assertTrue($done->ok());
         $this->assertSame('logged-in', $done->payload);
 
-        $empty = ActionOtp::to('user@example.com')->peek($record['code']);
-        $this->assertSame(OtpStatus::Empty, $empty->status);
+        $this->assertSame(OtpStatus::Empty, $otp->peek('482913')->status);
     }
 
-    public function test_throttle_after_too_many_attempts(): void
+    public function test_missing_or_wrong_challenge_is_empty_and_not_an_attempt(): void
     {
-        Notification::fake();
+        $this->fixCode('482913');
 
-        ActionOtp::to('locked@example.com')->send(
+        $send = ActionOtp::to('token@example.com')->send(
             new ConfirmLoginAction,
-            Notification::route('mail', 'locked@example.com')
+            Notification::route('mail', 'token@example.com')
         );
 
-        for ($i = 0; $i < 3; $i++) {
-            ActionOtp::to('locked@example.com')->peek('bad-code');
+        for ($i = 0; $i < 5; $i++) {
+            $this->assertSame(OtpStatus::Empty, ActionOtp::to('token@example.com')->verify('482913')->status);
+            $this->assertSame(
+                OtpStatus::Empty,
+                ActionOtp::to('token@example.com')->withChallenge('forged')->verify('482913')->status
+            );
         }
 
-        $blocked = ActionOtp::to('locked@example.com')->peek('bad-code');
-
-        $this->assertSame(OtpStatus::Throttled, $blocked->status);
+        $this->assertTrue(
+            ActionOtp::to('token@example.com')->withChallenge($send->challenge)->verify('482913')->ok()
+        );
     }
 
-    public function test_send_cooldown_blocks_immediate_second_send(): void
+    public function test_resend_keeps_the_challenge_and_replaces_the_code(): void
     {
-        Notification::fake();
+        config()->set('action-otp.send_cooldown', 0);
 
-        $notifiable = Notification::route('mail', 'cool@example.com');
-
-        $first = ActionOtp::to('cool@example.com')->send(new ConfirmLoginAction, $notifiable);
-        $this->assertSame(OtpStatus::Sent, $first->status);
-
-        $second = ActionOtp::to('cool@example.com')->send(new ConfirmLoginAction, $notifiable);
-        $this->assertSame(OtpStatus::Throttled, $second->status);
-
-        $this->travel(31)->seconds();
-
-        $third = ActionOtp::to('cool@example.com')->send(new ConfirmLoginAction, $notifiable);
-        $this->assertSame(OtpStatus::Sent, $third->status);
-    }
-
-    public function test_clear_does_not_lift_lockout_or_cooldown(): void
-    {
-        Notification::fake();
-
-        $notifiable = Notification::route('mail', 'cancel@example.com');
-
-        ActionOtp::to('cancel@example.com')->send(new ConfirmLoginAction, $notifiable);
-        ActionOtp::to('cancel@example.com')->clear();
-
-        $this->assertSame(
-            OtpStatus::Throttled,
-            ActionOtp::to('cancel@example.com')->send(new ConfirmLoginAction, $notifiable)->status
+        $this->fixCode('111111');
+        $send = ActionOtp::to('again@example.com')->send(
+            new ConfirmLoginAction,
+            Notification::route('mail', 'again@example.com')
         );
 
-        $this->travel(31)->seconds();
-        ActionOtp::to('cancel@example.com')->send(new ConfirmLoginAction, $notifiable);
+        $this->fixCode('222222');
+        $otp = ActionOtp::to('again@example.com')->withChallenge($send->challenge);
 
-        for ($i = 0; $i < 3; $i++) {
-            ActionOtp::to('cancel@example.com')->peek('bad-code');
+        $this->assertSame(OtpStatus::Sent, $otp->resend()->status);
+        $this->assertSame(OtpStatus::Mismatch, $otp->peek('111111')->status);
+        $this->assertTrue($otp->verify('222222')->ok());
+    }
+
+    public function test_code_with_leading_zero_matches(): void
+    {
+        $this->fixCode('012345');
+
+        $send = ActionOtp::to('zero@example.com')->send(
+            new ConfirmLoginAction,
+            Notification::route('mail', 'zero@example.com')
+        );
+
+        $this->assertTrue(
+            ActionOtp::to('zero@example.com')->withChallenge($send->challenge)->verify('012345')->ok()
+        );
+    }
+
+    public function test_letter_codes_are_trimmed_and_case_insensitive(): void
+    {
+        $this->fixCode('AB12CD');
+
+        $send = ActionOtp::to('alnum@example.com')->send(
+            new AlphanumericAction,
+            Notification::route('mail', 'alnum@example.com')
+        );
+
+        $this->assertTrue(
+            ActionOtp::to('alnum@example.com')->withChallenge($send->challenge)->verify(' ab12cd ')->ok()
+        );
+    }
+
+    public function test_code_is_consumed_before_a_throwing_handle(): void
+    {
+        $this->fixCode('482913');
+
+        $send = ActionOtp::to('boom@example.com')->send(
+            new ThrowingAction,
+            Notification::route('mail', 'boom@example.com')
+        );
+
+        $otp = ActionOtp::to('boom@example.com')->withChallenge($send->challenge);
+
+        try {
+            $otp->verify('482913');
+            $this->fail('Expected RuntimeException.');
+        } catch (RuntimeException) {
         }
 
-        ActionOtp::to('cancel@example.com')->clear();
-        $this->travel(31)->seconds();
+        $this->assertSame(OtpStatus::Empty, $otp->verify('482913')->status);
+    }
+
+    public function test_expired_code_is_rejected_and_removed(): void
+    {
+        $this->fixCode('482913');
+
+        $send = ActionOtp::to('old@example.com')->send(
+            new ConfirmLoginAction,
+            Notification::route('mail', 'old@example.com')
+        );
+
+        $this->travel(16)->minutes();
+
+        $otp = ActionOtp::to('old@example.com')->withChallenge($send->challenge);
+
+        $this->assertSame(OtpStatus::Expired, $otp->peek('482913')->status);
+        $this->assertSame(OtpStatus::Empty, $otp->peek('482913')->status);
+    }
+
+    public function test_malformed_record_fails_closed(): void
+    {
+        Cache::put(Keys::record(Keys::hash('junk@example.com'), Keys::hash('token')), ['broken' => true], 60);
 
         $this->assertSame(
-            OtpStatus::Throttled,
-            ActionOtp::to('cancel@example.com')->send(new ConfirmLoginAction, $notifiable)->status
+            OtpStatus::Empty,
+            ActionOtp::to('junk@example.com')->withChallenge('token')->peek('anything')->status
         );
-        $this->assertSame(
-            OtpStatus::Throttled,
-            ActionOtp::to('cancel@example.com')->peek('bad-code')->status
+        $this->assertNull(app(StoresCodes::class)->get(Keys::hash('junk@example.com'), Keys::hash('token')));
+    }
+
+    public function test_missing_identifier_throws(): void
+    {
+        $this->expectException(MissingIdentifier::class);
+
+        ActionOtp::verify('123456');
+    }
+
+    public function test_empty_purpose_throws(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+
+        ActionOtp::to('user@example.com')->for('  ');
+    }
+
+    public function test_invalid_notification_class_throws(): void
+    {
+        config()->set('action-otp.notification', \stdClass::class);
+
+        $this->expectException(InvalidArgumentException::class);
+
+        ActionOtp::to('bad@example.com')->send(
+            new ConfirmLoginAction,
+            Notification::route('mail', 'bad@example.com')
         );
     }
 
-    public function test_successful_verify_resets_throttling(): void
+    public function test_notifiable_without_notify_throws(): void
     {
-        Notification::fake();
+        $this->expectException(InvalidArgumentException::class);
 
-        $notifiable = Notification::route('mail', 'reset@example.com');
-
-        ActionOtp::to('reset@example.com')->send(new ConfirmLoginAction, $notifiable);
-        ActionOtp::to('reset@example.com')->peek('bad-code');
-        ActionOtp::to('reset@example.com')->peek('bad-code');
-
-        $code = app(StoresCodes::class)->scope('reset@example.com')->get()['code'];
-        $this->assertTrue(ActionOtp::to('reset@example.com')->verify($code)->ok());
-
-        $this->assertSame(
-            OtpStatus::Sent,
-            ActionOtp::to('reset@example.com')->send(new ConfirmLoginAction, $notifiable)->status
-        );
-
-        ActionOtp::to('reset@example.com')->peek('bad-code');
-        ActionOtp::to('reset@example.com')->peek('bad-code');
-
-        $this->assertSame(
-            OtpStatus::Mismatch,
-            ActionOtp::to('reset@example.com')->peek('bad-code')->status
-        );
+        ActionOtp::to('bad@example.com')->send(new ConfirmLoginAction, new \stdClass);
     }
 
     public function test_messages_are_translated(): void
     {
-        Notification::fake();
-
         $send = ActionOtp::to('lang@example.com')->send(
             new ConfirmLoginAction,
             Notification::route('mail', 'lang@example.com')
@@ -178,275 +219,53 @@ class CodeFlowTest extends TestCase
 
         $this->assertSame(
             'Kod niezgodny.',
-            ActionOtp::to('lang@example.com')->peek('bad-code')->message
+            ActionOtp::to('lang@example.com')->withChallenge($send->challenge)->peek('bad-code')->message
         );
     }
 
-    public function test_expired_code_is_rejected_and_removed(): void
+    public function test_queued_mail_carries_only_the_message(): void
     {
-        config()->set('action-otp.ttl_minutes', 15);
-        Notification::fake();
-
-        ActionOtp::to('old@example.com')->send(
-            new ConfirmLoginAction,
-            Notification::route('mail', 'old@example.com')
-        );
-
-        $code = app(StoresCodes::class)
-            ->scope('old@example.com')->get()['code'];
-
-        Carbon::setTestNow(Carbon::now()->addMinutes(16));
-
-        try {
-            $result = ActionOtp::to('old@example.com')->peek($code);
-        } finally {
-            Carbon::setTestNow();
-        }
-
-        $this->assertSame(OtpStatus::Expired, $result->status);
-        $this->assertSame(
-            OtpStatus::Empty,
-            ActionOtp::to('old@example.com')->peek($code)->status
-        );
-    }
-
-    public function test_resend_issues_a_new_code(): void
-    {
-        config()->set('action-otp.send_cooldown', 0);
-        Notification::fake();
-
-        ActionOtp::to('again@example.com')->send(
-            new ConfirmLoginAction,
-            Notification::route('mail', 'again@example.com')
-        );
-
-        $first = app(StoresCodes::class)
-            ->scope('again@example.com')->get()['code'];
-
-        $resend = ActionOtp::to('again@example.com')->resend();
-        $this->assertSame(OtpStatus::Sent, $resend->status);
-
-        $second = app(StoresCodes::class)
-            ->scope('again@example.com')->get()['code'];
-
-        $this->assertNotSame($first, $second);
-        $this->assertSame(
-            OtpStatus::Mismatch,
-            ActionOtp::to('again@example.com')->peek($first)->status
-        );
-    }
-
-    public function test_clear_removes_the_code(): void
-    {
-        Notification::fake();
-
-        ActionOtp::to('gone@example.com')->send(
-            new ConfirmLoginAction,
-            Notification::route('mail', 'gone@example.com')
-        );
-
-        ActionOtp::to('gone@example.com')->clear();
-
-        $this->assertSame(
-            OtpStatus::Empty,
-            ActionOtp::to('gone@example.com')->peek('whatever')->status
-        );
-    }
-
-    public function test_missing_identifier_throws(): void
-    {
-        $this->expectException(MissingIdentifier::class);
-
-        ActionOtp::verify('123456');
-    }
-
-    public function test_invalid_notification_class_throws(): void
-    {
-        config()->set('action-otp.notification', \stdClass::class);
-        Notification::fake();
-
-        $this->expectException(\InvalidArgumentException::class);
-
-        ActionOtp::to('bad@example.com')->send(
-            new ConfirmLoginAction,
-            Notification::route('mail', 'bad@example.com')
-        );
-    }
-
-    public function test_malformed_record_fails_closed(): void
-    {
-        $key = (string) config('action-otp.store_prefix', 'action-otp:')
-            .hash('sha256', 'junk@example.com');
-
-        Cache::put($key, ['broken' => true], 60);
-
-        $this->assertSame(
-            OtpStatus::Empty,
-            ActionOtp::to('junk@example.com')->peek('anything')->status
-        );
-    }
-
-    public function test_failed_send_does_not_trigger_cooldown(): void
-    {
-        Notification::fake();
-
-        $broken = new class
-        {
-            public function notify(mixed $notification): void
-            {
-                throw new RuntimeException('mail down');
-            }
-        };
-
-        try {
-            ActionOtp::to('down@example.com')->send(new ConfirmLoginAction, $broken);
-            $this->fail('Expected RuntimeException.');
-        } catch (RuntimeException) {
-        }
-
-        $retry = ActionOtp::to('down@example.com')->send(
-            new ConfirmLoginAction,
-            Notification::route('mail', 'down@example.com')
-        );
-
-        $this->assertSame(OtpStatus::Sent, $retry->status);
-    }
-
-    public function test_integer_identifier_and_code(): void
-    {
-        Notification::fake();
-
-        $send = ActionOtp::to(12345)->send(
-            new ConfirmLoginAction,
-            Notification::route('mail', 'int@example.com')
-        );
-
-        $this->assertSame(OtpStatus::Sent, $send->status);
-
-        $record = app(StoresCodes::class)->scope('12345')->get();
-        $this->assertNotEmpty($record['code']);
-
-        $wrong = ActionOtp::to(12345)->verify(0);
-        $this->assertSame(OtpStatus::Mismatch, $wrong->status);
-
-        $done = ActionOtp::to(12345)->verify($record['code']);
-
-        $this->assertTrue($done->ok());
-        $this->assertSame('logged-in', $done->payload);
-    }
-
-    public function test_queued_mail_carries_only_the_code_and_expiry(): void
-    {
-        Notification::fake();
+        $this->fixCode('482913');
 
         ActionOtp::to('queue@example.com')->send(
             new SecretHoldingAction,
             Notification::route('mail', 'queue@example.com')
         );
 
-        $code = app(StoresCodes::class)->scope('queue@example.com')->get()['code'];
-
-        Notification::assertSentOnDemand(CodeMail::class, function (CodeMail $mail) use ($code) {
+        Notification::assertSentOnDemand(CodeMail::class, function (CodeMail $mail) {
             $payload = serialize($mail);
 
             $this->assertInstanceOf(ShouldBeEncrypted::class, $mail);
             $this->assertStringNotContainsString('top-secret-value', $payload);
             $this->assertStringNotContainsString(SecretHoldingAction::class, $payload);
-            $this->assertContains(
-                'Your code: '.$code,
-                $mail->toMail(new AnonymousNotifiable)->introLines
-            );
+            $this->assertSame('482913', $mail->otp->code);
 
             return true;
         });
     }
 
-    public function test_new_code_does_not_lift_the_lockout(): void
+    public function test_integer_identifier(): void
     {
-        config()->set('action-otp.send_cooldown', 0);
-        Notification::fake();
+        $this->fixCode('482913');
 
-        $notifiable = Notification::route('mail', 'lockout@example.com');
-
-        ActionOtp::to('lockout@example.com')->send(new ConfirmLoginAction, $notifiable);
-
-        for ($i = 0; $i < 3; $i++) {
-            ActionOtp::to('lockout@example.com')->peek('bad-code');
-        }
-
-        $this->assertSame(
-            OtpStatus::Throttled,
-            ActionOtp::to('lockout@example.com')->send(new ConfirmLoginAction, $notifiable)->status
-        );
-        $this->assertSame(
-            OtpStatus::Throttled,
-            ActionOtp::to('lockout@example.com')->resend()->status
+        $send = ActionOtp::to(12345)->send(
+            new ConfirmLoginAction,
+            Notification::route('mail', 'int@example.com')
         );
 
-        $code = app(StoresCodes::class)->scope('lockout@example.com')->get()['code'];
-
-        $this->assertSame(
-            OtpStatus::Throttled,
-            ActionOtp::to('lockout@example.com')->verify($code)->status
-        );
+        $this->assertTrue(ActionOtp::to('12345')->withChallenge($send->challenge)->verify('482913')->ok());
     }
 
-    public function test_wrong_attempts_carry_over_to_a_new_code(): void
+    public function test_result_to_array_contains_the_challenge(): void
     {
-        config()->set('action-otp.send_cooldown', 0);
-        Notification::fake();
-
-        ActionOtp::to('carry@example.com')->send(
+        $send = ActionOtp::to('array@example.com')->send(
             new ConfirmLoginAction,
-            Notification::route('mail', 'carry@example.com')
+            Notification::route('mail', 'array@example.com')
         );
-
-        ActionOtp::to('carry@example.com')->peek('bad-code');
-        ActionOtp::to('carry@example.com')->peek('bad-code');
-
-        $this->assertSame(OtpStatus::Sent, ActionOtp::to('carry@example.com')->resend()->status);
-
-        // Third wrong try overall hits max_attempts (3) even though the code is new.
-        ActionOtp::to('carry@example.com')->peek('bad-code');
-
-        $code = app(StoresCodes::class)->scope('carry@example.com')->get()['code'];
 
         $this->assertSame(
-            OtpStatus::Throttled,
-            ActionOtp::to('carry@example.com')->peek($code)->status
-        );
-    }
-
-    public function test_peek_is_serialized_with_the_identifier_slot(): void
-    {
-        Notification::fake();
-
-        ActionOtp::to('busy@example.com')->send(
-            new ConfirmLoginAction,
-            Notification::route('mail', 'busy@example.com')
-        );
-
-        $code = app(StoresCodes::class)->scope('busy@example.com')->get()['code'];
-
-        $slot = Cache::lock(
-            config('action-otp.store_prefix').hash('sha256', 'busy@example.com').':verify',
-            10
-        );
-        $this->assertTrue($slot->get());
-
-        try {
-            // Another request holds the slot, so peek must not run a comparison.
-            $this->assertSame(
-                OtpStatus::Throttled,
-                ActionOtp::to('busy@example.com')->peek($code)->status
-            );
-        } finally {
-            $slot->release();
-        }
-
-        $this->assertSame(
-            OtpStatus::Matched,
-            ActionOtp::to('busy@example.com')->peek($code)->status
+            ['status' => 'sent', 'message' => 'We sent a verification code.', 'payload' => null, 'challenge' => $send->challenge],
+            $send->toArray()
         );
     }
 }

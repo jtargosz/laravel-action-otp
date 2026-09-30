@@ -2,35 +2,25 @@
 
 namespace Jtargosz\ActionOtp\Mail;
 
-use DateTimeInterface;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeEncrypted;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notification;
+use Illuminate\Support\Carbon;
+use Jtargosz\ActionOtp\Support\OtpMessage;
 
+/**
+ * Default notification. Gets only the OtpMessage (code, expiry, purpose,
+ * link), never the pending action, and is encrypted on the queue.
+ *
+ * Publish the view with `php artisan vendor:publish --tag=action-otp-views`.
+ */
 class CodeMail extends Notification implements ShouldBeEncrypted, ShouldQueue
 {
     use Queueable;
 
-    /**
-     * Only the code and its expiry. The pending action and the notifiable are
-     * dropped on purpose so they never land in the queue payload or failed_jobs.
-     *
-     * @var array{code: string, expires_at: DateTimeInterface}
-     */
-    protected array $record;
-
-    /**
-     * @param  array{action: mixed, notifiable: mixed, code: string, expires_at: DateTimeInterface}  $record
-     */
-    public function __construct(array $record)
-    {
-        $this->record = [
-            'code' => $record['code'],
-            'expires_at' => $record['expires_at'],
-        ];
-    }
+    public function __construct(public OtpMessage $otp) {}
 
     /**
      * @return array<int, string>
@@ -43,9 +33,14 @@ class CodeMail extends Notification implements ShouldBeEncrypted, ShouldQueue
     public function toMail(object $notifiable): MailMessage
     {
         return (new MailMessage)
-            ->subject('Verification code')
-            ->line('Your code: '.$this->record['code'])
-            ->line('Valid until '.$this->record['expires_at']->format('Y-m-d H:i T'))
-            ->line('If this was not you, ignore this message.');
+            ->subject((string) __('action-otp::action-otp.mail.subject', ['app' => (string) config('app.name', 'Laravel')]))
+            ->markdown('action-otp::mail.code', [
+                'code' => $this->otp->code,
+                'expires' => Carbon::instance($this->otp->expiresAt)
+                    ->setTimezone((string) config('app.timezone', 'UTC'))
+                    ->locale(app()->getLocale())
+                    ->isoFormat('LLL'),
+                'link' => $this->otp->link,
+            ]);
     }
 }

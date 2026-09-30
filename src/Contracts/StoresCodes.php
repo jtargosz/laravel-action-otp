@@ -2,19 +2,39 @@
 
 namespace Jtargosz\ActionOtp\Contracts;
 
+use DateTimeInterface;
+
+/**
+ * Stores pending records, one per challenge. Implementations must only touch
+ * the record itself: attempt counters, lockout and cooldown belong to the
+ * manager and must survive forget().
+ *
+ * @phpstan-type OtpRecord array{
+ *     identifier: string,
+ *     purpose: string,
+ *     action: VerifiableAction,
+ *     notifiable: object,
+ *     code: string,
+ *     format: string,
+ *     link: string|null,
+ *     expires_at: DateTimeInterface,
+ *     any_device: bool
+ * }
+ */
 interface StoresCodes
 {
-    public function scope(string $identifier): static;
-
     /**
-     * @param  array{action: mixed, notifiable: mixed, code: string, expires_at: \DateTimeInterface}  $record
+     * @param  OtpRecord  $record
      */
-    public function put(array $record): void;
+    public function put(string $identifierHash, string $challengeHash, array $record): void;
 
     /**
+     * Returns whatever is stored. The manager validates the shape, so a broken
+     * or foreign value fails closed.
+     *
      * @return array<string, mixed>|null
      */
-    public function get(): ?array;
+    public function get(string $identifierHash, string $challengeHash): ?array;
 
-    public function flush(): void;
+    public function forget(string $identifierHash, string $challengeHash): void;
 }

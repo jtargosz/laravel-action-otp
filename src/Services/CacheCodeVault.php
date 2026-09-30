@@ -5,63 +5,46 @@ namespace Jtargosz\ActionOtp\Services;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Jtargosz\ActionOtp\Contracts\StoresCodes;
-use Jtargosz\ActionOtp\Exceptions\MissingIdentifier;
+use Jtargosz\ActionOtp\Support\Keys;
 
+/**
+ * @phpstan-import-type OtpRecord from StoresCodes
+ */
 class CacheCodeVault implements StoresCodes
 {
-    protected string $hash = '';
-
-    public function scope(string $identifier): static
-    {
-        $identifier = trim($identifier);
-
-        if ($identifier === '') {
-            throw new MissingIdentifier('Identifier is empty.');
-        }
-
-        $clone = clone $this;
-        $clone->hash = hash('sha256', $identifier);
-
-        return $clone;
-    }
-
     /**
-     * @param  array{action: mixed, notifiable: mixed, code: string, expires_at: \DateTimeInterface}  $record
+     * @param  OtpRecord  $record
      */
-    public function put(array $record): void
+    public function put(string $identifierHash, string $challengeHash, array $record): void
     {
-        $grace = max(0, (int) config('action-otp.expired_grace_minutes', 5));
-
-        $ttl = $record['expires_at']->getTimestamp() - Carbon::now()->getTimestamp() + $grace * 60;
-
-        Cache::put($this->key(), $record, max(60, $ttl));
+        Cache::put(Keys::record($identifierHash, $challengeHash), $record, self::ttl($record['expires_at']));
     }
 
     /**
      * @return array<string, mixed>|null
      */
-    public function get(): ?array
+    public function get(string $identifierHash, string $challengeHash): ?array
     {
-        $record = Cache::get($this->key());
+        $record = Cache::get(Keys::record($identifierHash, $challengeHash));
 
         return is_array($record) ? $record : null;
     }
 
-    /**
-     * Deletes only the record. Attempt counters, lockout and send cooldown are
-     * owned by the manager and survive, so cancelling cannot reset throttling.
-     */
-    public function flush(): void
+    public function forget(string $identifierHash, string $challengeHash): void
     {
-        Cache::forget($this->key());
+        Cache::forget(Keys::record($identifierHash, $challengeHash));
     }
 
-    protected function key(): string
+    /**
+     * Seconds to keep a record: its lifetime plus the grace period in which an
+     * expired code still reads as "expired" instead of "empty".
+     */
+    public static function ttl(\DateTimeInterface $expiresAt): int
     {
-        if ($this->hash === '') {
-            throw new MissingIdentifier('No identifier set.');
-        }
+        $grace = max(0, (int) config('action-otp.expired_grace_minutes', 5));
 
-        return (string) config('action-otp.store_prefix', 'action-otp:').$this->hash;
+        $ttl = $expiresAt->getTimestamp() - Carbon::now()->getTimestamp() + $grace * 60;
+
+        return max(60, $ttl);
     }
 }
