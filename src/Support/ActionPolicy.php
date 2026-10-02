@@ -19,12 +19,18 @@ use ReflectionClass;
 final class ActionPolicy
 {
     /**
-     * Attribute reads per class. Config fallbacks are resolved on every call,
+     * Attribute reads per class. These are reset between tests by
+     * resetAttributes(). Config fallbacks are resolved on every call,
      * so config changes still apply.
      *
      * @var array<class-string, array{ttl: int|null, format: string|null, length: int|null, notification: string|null, any_device: bool}>
      */
     private static array $attributes = [];
+
+    public static function resetAttributes(): void
+    {
+        self::$attributes = [];
+    }
 
     /**
      * @param  class-string<Notification>  $notification

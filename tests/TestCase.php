@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Notification;
 use Jtargosz\ActionOtp\ActionOtpServiceProvider;
 use Jtargosz\ActionOtp\Contracts\GeneratesCodes;
 use Jtargosz\ActionOtp\Facades\ActionOtp;
+use Jtargosz\ActionOtp\Support\ActionPolicy;
 use Jtargosz\ActionOtp\Support\OtpMessage;
 use Jtargosz\ActionOtp\Testing\FixedCodeGenerator;
 use Orchestra\Testbench\TestCase as Base;
@@ -20,6 +21,12 @@ abstract class TestCase extends Base
      * @var array<string, Store>
      */
     private array $browsers = [];
+
+    protected function tearDown(): void
+    {
+        ActionPolicy::resetAttributes();
+        parent::tearDown();
+    }
 
     protected function getPackageProviders($app): array
     {
