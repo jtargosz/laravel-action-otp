@@ -1,5 +1,33 @@
 # Changelog
 
+## 2.0.0 - Unreleased
+
+Breaking changes, see [UPGRADE.md](UPGRADE.md):
+
+- Each code is bound to the browser session or the challenge token returned by `send()`. A send from another browser can no longer replace a pending action
+- `verify()` and `peek()` accept only string codes, `send()` needs an object notifiable
+- Notifications receive an `OtpMessage` instead of the record array. Events carry no code and no action
+- New `StoresCodes` contract (`put`, `get`, `forget` by identifier and challenge hash)
+- AI tools `SendOtpTool` and `VerifyOtpTool` replaced by `ResendOtpTool` and `CheckOtpTool`, which take the identifier from the constructor
+- Pending codes from 1.x are not read after the upgrade
+
+Added:
+
+- Purposes with `for()`: several pending actions per identifier
+- `withChallenge()` for API clients, `OtpResult::$challenge`
+- Per action attributes `#[Ttl]`, `#[CodeFormat]`, `#[CodeLength]`, `#[SendWith]` and `#[AnyDevice]`
+- `ActionOtp::fake()` with `assertSent`, `assertSentTimes`, `assertNotSent`, `assertNothingSent`, `assertVerified`, `assertNotVerified`, `codeFor`, `challengeFor`, `messageFor`
+- Translated markdown mail (publish tag `action-otp-views`), `OtpMessage::smsText()` with the `@host #code` autofill line
+- Optional routes with `ActionOtp::routes()`: verify, resend, scanner-safe magic link, `otp.confirm` middleware with confirm pages. Replaceable `VerifyResponse`
+- Status `device_mismatch`
+- Config keys `sms_host`, `link.enabled`, `rate_limit`, `confirm_timeout`, `redirects.verified`
+
+Fixed:
+
+- A parallel send can no longer skip the send cooldown
+- Letter codes are case-insensitive and all codes are trimmed
+- `ValidOtpCode` fails array and number input and a missing identifier without an exception and without counting an attempt
+
 ## 1.2.0 - 2026-09-30
 
 Security fixes:
