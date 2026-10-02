@@ -2,11 +2,12 @@
 
 ## Supported Versions
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 1.x     | :white_check_mark: |
+| Version | Supported                   |
+| ------- | --------------------------- |
+| 2.x     | :white_check_mark:          |
+| 1.x     | Security fixes only         |
 
-Only the latest `1.x` release is supported with security updates.
+Only the latest `2.x` release gets bug fixes. The latest `1.x` release gets security fixes only.
 
 ## Reporting a Vulnerability
 
@@ -31,10 +32,11 @@ What to expect:
 
 ## Scope
 
-In scope: this package (`src/`, `config/`, `stubs/`, default notification and AI tools).
+In scope: this package (`src/`, `config/`, `resources/`, `stubs/`, default notification, routes, magic link, `otp.confirm` and AI tools).
 
 The security model is documented in `README.md` → Security: short-lived codes in cache,
-`hash_equals` comparison, per-identifier throttling, send cooldown, atomic single-run `verify()`.
+session or challenge binding, `hash_equals` comparison, per-identifier throttling, send cooldown,
+atomic single-run `verify()`, scanner-safe magic link.
 Reports that bypass or break those guarantees are of particular interest.
 
 Out of scope: vulnerabilities in Laravel itself, in your app code (e.g. missing `throttle`

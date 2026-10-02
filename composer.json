@@ -1,7 +1,7 @@
 {
     "name": "jtargosz/laravel-action-otp",
-    "description": "Action based one time codes for Laravel 13",
-    "keywords": ["laravel", "laravel-13", "otp", "one-time-password", "verification", "verification-code", "2fa", "action-otp"],
+    "description": "Confirm any action with a one-time code in Laravel 13: the action runs once, only after the code is verified",
+    "keywords": ["laravel", "laravel-13", "otp", "one-time-password", "one-time-code", "verification", "verification-code", "2fa", "magic-link", "sms", "confirmation", "action-otp"],
     "type": "library",
     "license": "MIT",
     "authors": [
@@ -14,8 +14,15 @@
         "illuminate/cache": "^13.0",
         "illuminate/console": "^13.0",
         "illuminate/contracts": "^13.0",
+        "illuminate/http": "^13.0",
+        "illuminate/mail": "^13.0",
         "illuminate/notifications": "^13.0",
-        "illuminate/support": "^13.0"
+        "illuminate/routing": "^13.0",
+        "illuminate/session": "^13.0",
+        "illuminate/support": "^13.0",
+        "illuminate/translation": "^13.0",
+        "illuminate/validation": "^13.0",
+        "illuminate/view": "^13.0"
     },
     "require-dev": {
         "laravel/ai": "^1.0",
@@ -35,7 +42,10 @@
     "autoload-dev": {
         "psr-4": {
             "Jtargosz\\ActionOtp\\Tests\\": "tests/"
-        }
+        },
+        "classmap": [
+            "tests/Fixtures/Actions.php"
+        ]
     },
     "extra": {
         "laravel": {
