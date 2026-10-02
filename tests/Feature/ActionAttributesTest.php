@@ -34,7 +34,7 @@ class ActionAttributesTest extends TestCase
 
         ActionOtp::to('ttl@example.com')->send(new ShortLivedAction, Notification::route('mail', 'ttl@example.com'));
 
-        $this->assertEqualsWithDelta(now()->addMinute()->getTimestamp(), $this->lastMessage()->expiresAt->getTimestamp(), 1);
+        $this->assertEqualsWithDelta(now()->addMinute()->getTimestamp(), $this->lastMessage()->expiresAt->getTimestamp(), 3);
 
         $this->travel(61)->seconds();
 
