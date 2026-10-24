@@ -9,17 +9,20 @@ use Jtargosz\ActionOtp\Support\OtpMessage;
  * Shared by every clone of one fake, so to() and for() calls record into the
  * same place.
  *
+ * @phpstan-type SentRecord array{identifier: string, purpose: string, action: VerifiableAction, message: OtpMessage, challenge: string|null}
+ * @phpstan-type VerifiedRecord array{identifier: string, purpose: string, action: VerifiableAction, payload: mixed}
+ *
  * @internal
  */
 final class Recorder
 {
     /**
-     * @var list<array{identifier: string, purpose: string, action: VerifiableAction, message: OtpMessage, challenge: string|null}>
+     * @var list<SentRecord>
      */
     public array $sent = [];
 
     /**
-     * @var list<array{identifier: string, purpose: string, action: VerifiableAction, payload: mixed}>
+     * @var list<VerifiedRecord>
      */
     public array $verified = [];
 }

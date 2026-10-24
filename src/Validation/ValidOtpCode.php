@@ -8,7 +8,8 @@ use Jtargosz\ActionOtp\Facades\ActionOtp;
 
 /**
  * Checks the code with peek(): it stays valid for verify(), but a wrong code
- * counts as an attempt. Invalid input fails without counting.
+ * counts as an attempt. Invalid input, a blank identifier or a blank purpose
+ * fail without counting.
  */
 class ValidOtpCode implements ValidationRule
 {
@@ -22,6 +23,12 @@ class ValidOtpCode implements ValidationRule
     {
         if ((! is_string($this->identifier) && ! is_int($this->identifier))
             || trim((string) $this->identifier) === '') {
+            $fail((string) __('action-otp::action-otp.empty'));
+
+            return;
+        }
+
+        if (trim($this->purpose) === '') {
             $fail((string) __('action-otp::action-otp.empty'));
 
             return;

@@ -17,7 +17,8 @@ use RuntimeException;
  * Real manager (storage, sessions, throttling, verify) that records sends
  * instead of delivering notifications. Enable with ActionOtp::fake().
  *
- * @phpstan-import-type OtpRecord from StoresCodes
+ * @phpstan-import-type SentRecord from Recorder
+ * @phpstan-import-type VerifiedRecord from Recorder
  */
 class ActionOtpFake extends CodeManager
 {
@@ -28,16 +29,12 @@ class ActionOtpFake extends CodeManager
         GeneratesCodes $codes,
         Throttle $throttle,
         SessionChallenges $sessions,
-        ?Recorder $recorder = null,
     ) {
         parent::__construct($vault, $codes, $throttle, $sessions);
 
-        $this->recorder = $recorder ?? new Recorder;
+        $this->recorder = new Recorder;
     }
 
-    /**
-     * @param  OtpRecord  $record
-     */
     protected function deliver(array $record, ActionPolicy $policy, OtpMessage $message, ?string $challenge): void
     {
         $this->recorder->sent[] = [
@@ -50,9 +47,6 @@ class ActionOtpFake extends CodeManager
         ];
     }
 
-    /**
-     * @param  OtpRecord  $record
-     */
     protected function verified(array $record, mixed $payload): void
     {
         parent::verified($record, $payload);
@@ -116,13 +110,10 @@ class ActionOtpFake extends CodeManager
      */
     public function assertVerified(string $action, ?callable $callback = null): void
     {
-        $matching = array_filter(
-            $this->recorder->verified,
-            fn (array $verified) => $verified['action'] instanceof $action
-                && ($callback === null || $callback($verified['action'], $verified['payload'], $verified['identifier'], $verified['purpose']))
+        PHPUnit::assertNotEmpty(
+            $this->verifiedMatching($action, $callback),
+            "The expected OTP action [{$action}] was not verified."
         );
-
-        PHPUnit::assertNotEmpty($matching, "The expected OTP action [{$action}] was not verified.");
     }
 
     /**
@@ -130,9 +121,10 @@ class ActionOtpFake extends CodeManager
      */
     public function assertNotVerified(string $action): void
     {
-        $matching = array_filter($this->recorder->verified, fn (array $verified) => $verified['action'] instanceof $action);
-
-        PHPUnit::assertEmpty($matching, "The unexpected OTP action [{$action}] was verified.");
+        PHPUnit::assertEmpty(
+            $this->verifiedMatching($action),
+            "The unexpected OTP action [{$action}] was verified."
+        );
     }
 
     /**
@@ -165,7 +157,7 @@ class ActionOtpFake extends CodeManager
     /**
      * @param  class-string<VerifiableAction>  $action
      * @param  (callable(VerifiableAction, OtpMessage, string, string): bool)|null  $callback
-     * @return list<array{identifier: string, purpose: string, action: VerifiableAction, message: OtpMessage, challenge: string|null}>
+     * @return list<SentRecord>
      */
     protected function sentMatching(string $action, ?callable $callback = null): array
     {
@@ -177,7 +169,21 @@ class ActionOtpFake extends CodeManager
     }
 
     /**
-     * @return array{identifier: string, purpose: string, action: VerifiableAction, message: OtpMessage, challenge: string|null}|null
+     * @param  class-string<VerifiableAction>  $action
+     * @param  (callable(VerifiableAction, mixed, string, string): bool)|null  $callback
+     * @return list<VerifiedRecord>
+     */
+    protected function verifiedMatching(string $action, ?callable $callback = null): array
+    {
+        return array_values(array_filter(
+            $this->recorder->verified,
+            fn (array $verified) => $verified['action'] instanceof $action
+                && ($callback === null || $callback($verified['action'], $verified['payload'], $verified['identifier'], $verified['purpose']))
+        ));
+    }
+
+    /**
+     * @return SentRecord|null
      */
     protected function lastSent(string|int $identifier, string $purpose): ?array
     {
@@ -193,7 +199,7 @@ class ActionOtpFake extends CodeManager
     }
 
     /**
-     * @return array{identifier: string, purpose: string, action: VerifiableAction, message: OtpMessage, challenge: string|null}
+     * @return SentRecord
      */
     protected function lastSentOrFail(string|int $identifier, string $purpose): array
     {

@@ -121,7 +121,7 @@ class CodeManager implements ManagesCodes
 
         try {
             // A new code never lifts the lockout or skips the cooldown.
-            if ($this->throttle->locked($identifierHash) || $this->throttle->coolingDown($identifierHash)) {
+            if ($this->sendBlocked($identifierHash)) {
                 return OtpResult::of(OtpStatus::Throttled);
             }
 
@@ -129,17 +129,14 @@ class CodeManager implements ManagesCodes
 
             $challenge = Str::random(40);
             $challengeHash = Keys::hash($challenge);
-            $linkToken = $this->linksEnabled() ? Str::random(40) : null;
+            [$fresh, $linkToken] = $this->freshCode($policy);
 
             $record = [
                 'identifier' => $identifier,
                 'purpose' => $this->purpose,
                 'action' => $action,
                 'notifiable' => $notifiable,
-                'code' => $this->normalize($this->codes->make($policy->format, $policy->length), $policy->format),
-                'format' => $policy->format,
-                'link' => $linkToken === null ? null : Keys::hash($linkToken),
-                'expires_at' => Carbon::now()->addMinutes($policy->ttlMinutes),
+                ...$fresh,
                 'any_device' => $policy->anyDevice,
             ];
 
@@ -247,15 +244,10 @@ class CodeManager implements ManagesCodes
                 return OtpResult::of(OtpStatus::Empty);
             }
 
-            $record = $this->validRecord($this->vault->get($identifierHash, $challengeHash));
+            // No expiry check: a code within the grace period can still be resent.
+            $record = $this->pending($challengeHash);
 
             if ($record === null) {
-                $this->forget($challengeHash);
-
-                return OtpResult::of(OtpStatus::Empty);
-            }
-
-            if ($record['purpose'] !== $this->purpose) {
                 return OtpResult::of(OtpStatus::Empty);
             }
 
@@ -264,16 +256,12 @@ class CodeManager implements ManagesCodes
             $this->assertNotifiable($record['notifiable']);
             $this->assertLinkRoutes();
 
-            if ($this->throttle->locked($identifierHash) || $this->throttle->coolingDown($identifierHash)) {
+            if ($this->sendBlocked($identifierHash)) {
                 return OtpResult::of(OtpStatus::Throttled);
             }
 
-            $linkToken = $this->linksEnabled() ? Str::random(40) : null;
-
-            $record['code'] = $this->normalize($this->codes->make($policy->format, $policy->length), $policy->format);
-            $record['format'] = $policy->format;
-            $record['link'] = $linkToken === null ? null : Keys::hash($linkToken);
-            $record['expires_at'] = Carbon::now()->addMinutes($policy->ttlMinutes);
+            [$fresh, $linkToken] = $this->freshCode($policy);
+            $record = [...$record, ...$fresh];
 
             $this->vault->put($identifierHash, $challengeHash, $record);
             $this->bind($challengeHash, $record);
@@ -348,15 +336,9 @@ class CodeManager implements ManagesCodes
             return [OtpResult::of($link ? OtpStatus::DeviceMismatch : OtpStatus::Empty), null, null];
         }
 
-        $record = $this->validRecord($this->vault->get($identifierHash, $challengeHash));
+        $record = $this->pending($challengeHash);
 
         if ($record === null) {
-            $this->forget($challengeHash);
-
-            return [OtpResult::of(OtpStatus::Empty), null, null];
-        }
-
-        if ($record['purpose'] !== $this->purpose) {
             return [OtpResult::of(OtpStatus::Empty), null, null];
         }
 
@@ -423,10 +405,8 @@ class CodeManager implements ManagesCodes
             $this->sessions->forget($identifierHash, $purposeHash);
         }
 
-        $pointer = Keys::pointer($identifierHash, $purposeHash);
-
-        if (Cache::get($pointer) === $challengeHash) {
-            Cache::forget($pointer);
+        if ($this->pointer($identifierHash, $purposeHash) === $challengeHash) {
+            Cache::forget(Keys::pointer($identifierHash, $purposeHash));
         }
     }
 
@@ -490,6 +470,47 @@ class CodeManager implements ManagesCodes
     }
 
     /**
+     * The record of the current purpose stored under a challenge. Broken
+     * records are deleted.
+     *
+     * @return OtpRecord|null
+     */
+    protected function pending(string $challengeHash): ?array
+    {
+        $record = $this->validRecord($this->vault->get($this->needHash(), $challengeHash));
+
+        if ($record === null) {
+            $this->forget($challengeHash);
+
+            return null;
+        }
+
+        return $record['purpose'] === $this->purpose ? $record : null;
+    }
+
+    /**
+     * New code, link token and expiry. The record keeps only the link hash.
+     *
+     * @return array{0: array{code: string, format: string, link: string|null, expires_at: Carbon}, 1: string|null}
+     */
+    protected function freshCode(ActionPolicy $policy): array
+    {
+        $linkToken = $this->linksEnabled() ? Str::random(40) : null;
+
+        return [[
+            'code' => $this->normalize($this->codes->make($policy->format, $policy->length), $policy->format),
+            'format' => $policy->format,
+            'link' => $linkToken === null ? null : Keys::hash($linkToken),
+            'expires_at' => Carbon::now()->addMinutes($policy->ttlMinutes),
+        ], $linkToken];
+    }
+
+    protected function sendBlocked(string $identifierHash): bool
+    {
+        return $this->throttle->locked($identifierHash) || $this->throttle->coolingDown($identifierHash);
+    }
+
+    /**
      * @return OtpRecord|null
      */
     protected function validRecord(mixed $record): ?array
@@ -540,6 +561,7 @@ class CodeManager implements ManagesCodes
      */
     protected function deliver(array $record, ActionPolicy $policy, OtpMessage $message, ?string $challenge): void
     {
+        // Notification has no constructor, the subclass takes the message.
         /** @var class-string $class */
         $class = $policy->notification;
 

@@ -18,36 +18,30 @@ class ThrottleTest extends TestCase
     {
         parent::setUp();
 
-        Notification::fake();
         $this->noBrowser();
-        $this->fixCode('482913');
-    }
-
-    private function send(string $identifier): OtpResult
-    {
-        return ActionOtp::to($identifier)->send(new ConfirmLoginAction, Notification::route('mail', $identifier));
+        $this->fixCode(self::CODE);
     }
 
     public function test_lock_after_too_many_attempts(): void
     {
-        $otp = ActionOtp::to('locked@example.com')->withChallenge($this->send('locked@example.com')->challenge);
+        $otp = ActionOtp::to('locked@example.com')->withChallenge($this->sendCode('locked@example.com')->challenge);
 
         for ($i = 0; $i < 3; $i++) {
             $this->assertSame(OtpStatus::Mismatch, $otp->peek('bad-code')->status);
         }
 
-        $this->assertSame(OtpStatus::Throttled, $otp->peek('482913')->status);
-        $this->assertSame(OtpStatus::Throttled, $otp->verify('482913')->status);
+        $this->assertSame(OtpStatus::Throttled, $otp->peek(self::CODE)->status);
+        $this->assertSame(OtpStatus::Throttled, $otp->verify(self::CODE)->status);
     }
 
     public function test_send_cooldown_blocks_immediate_second_send(): void
     {
-        $this->assertSame(OtpStatus::Sent, $this->send('cool@example.com')->status);
-        $this->assertSame(OtpStatus::Throttled, $this->send('cool@example.com')->status);
+        $this->assertSame(OtpStatus::Sent, $this->sendCode('cool@example.com')->status);
+        $this->assertSame(OtpStatus::Throttled, $this->sendCode('cool@example.com')->status);
 
         $this->travel(31)->seconds();
 
-        $this->assertSame(OtpStatus::Sent, $this->send('cool@example.com')->status);
+        $this->assertSame(OtpStatus::Sent, $this->sendCode('cool@example.com')->status);
     }
 
     public function test_send_from_inside_notify_sees_the_cooldown(): void
@@ -90,29 +84,29 @@ class ThrottleTest extends TestCase
         } catch (RuntimeException) {
         }
 
-        $this->assertSame(OtpStatus::Sent, $this->send('down@example.com')->status);
+        $this->assertSame(OtpStatus::Sent, $this->sendCode('down@example.com')->status);
     }
 
     public function test_new_code_does_not_lift_the_lockout(): void
     {
         config()->set('action-otp.send_cooldown', 0);
 
-        $otp = ActionOtp::to('lockout@example.com')->withChallenge($this->send('lockout@example.com')->challenge);
+        $otp = ActionOtp::to('lockout@example.com')->withChallenge($this->sendCode('lockout@example.com')->challenge);
 
         for ($i = 0; $i < 3; $i++) {
             $otp->peek('bad-code');
         }
 
-        $this->assertSame(OtpStatus::Throttled, $this->send('lockout@example.com')->status);
+        $this->assertSame(OtpStatus::Throttled, $this->sendCode('lockout@example.com')->status);
         $this->assertSame(OtpStatus::Throttled, $otp->resend()->status);
-        $this->assertSame(OtpStatus::Throttled, $otp->verify('482913')->status);
+        $this->assertSame(OtpStatus::Throttled, $otp->verify(self::CODE)->status);
     }
 
     public function test_wrong_attempts_carry_over_to_a_new_code(): void
     {
         config()->set('action-otp.send_cooldown', 0);
 
-        $otp = ActionOtp::to('carry@example.com')->withChallenge($this->send('carry@example.com')->challenge);
+        $otp = ActionOtp::to('carry@example.com')->withChallenge($this->sendCode('carry@example.com')->challenge);
 
         $otp->peek('bad-code');
         $otp->peek('bad-code');
@@ -122,19 +116,19 @@ class ThrottleTest extends TestCase
         // Third wrong try overall hits max_attempts (3) although the code is new.
         $otp->peek('bad-code');
 
-        $this->assertSame(OtpStatus::Throttled, $otp->peek('482913')->status);
+        $this->assertSame(OtpStatus::Throttled, $otp->peek(self::CODE)->status);
     }
 
     public function test_clear_does_not_lift_lockout_or_cooldown(): void
     {
-        $otp = ActionOtp::to('cancel@example.com')->withChallenge($this->send('cancel@example.com')->challenge);
+        $otp = ActionOtp::to('cancel@example.com')->withChallenge($this->sendCode('cancel@example.com')->challenge);
         $otp->clear();
 
-        $this->assertSame(OtpStatus::Empty, $otp->peek('482913')->status);
-        $this->assertSame(OtpStatus::Throttled, $this->send('cancel@example.com')->status);
+        $this->assertSame(OtpStatus::Empty, $otp->peek(self::CODE)->status);
+        $this->assertSame(OtpStatus::Throttled, $this->sendCode('cancel@example.com')->status);
 
         $this->travel(31)->seconds();
-        $otp = ActionOtp::to('cancel@example.com')->withChallenge($this->send('cancel@example.com')->challenge);
+        $otp = ActionOtp::to('cancel@example.com')->withChallenge($this->sendCode('cancel@example.com')->challenge);
 
         for ($i = 0; $i < 3; $i++) {
             $otp->peek('bad-code');
@@ -143,18 +137,18 @@ class ThrottleTest extends TestCase
         $otp->clear();
         $this->travel(31)->seconds();
 
-        $this->assertSame(OtpStatus::Throttled, $this->send('cancel@example.com')->status);
+        $this->assertSame(OtpStatus::Throttled, $this->sendCode('cancel@example.com')->status);
     }
 
     public function test_successful_verify_resets_throttling(): void
     {
-        $otp = ActionOtp::to('reset@example.com')->withChallenge($this->send('reset@example.com')->challenge);
+        $otp = ActionOtp::to('reset@example.com')->withChallenge($this->sendCode('reset@example.com')->challenge);
         $otp->peek('bad-code');
         $otp->peek('bad-code');
 
-        $this->assertTrue($otp->verify('482913')->ok());
+        $this->assertTrue($otp->verify(self::CODE)->ok());
 
-        $send = $this->send('reset@example.com');
+        $send = $this->sendCode('reset@example.com');
         $this->assertSame(OtpStatus::Sent, $send->status);
 
         $otp = ActionOtp::to('reset@example.com')->withChallenge($send->challenge);
@@ -166,18 +160,18 @@ class ThrottleTest extends TestCase
 
     public function test_operations_are_serialized_with_the_identifier_slot(): void
     {
-        $otp = ActionOtp::to('busy@example.com')->withChallenge($this->send('busy@example.com')->challenge);
+        $otp = ActionOtp::to('busy@example.com')->withChallenge($this->sendCode('busy@example.com')->challenge);
 
         $slot = Cache::lock(Keys::identifier(Keys::hash('busy@example.com'), ':verify'), 10);
         $this->assertTrue($slot->get());
 
         try {
-            $this->assertSame(OtpStatus::Throttled, $otp->peek('482913')->status);
-            $this->assertSame(OtpStatus::Throttled, $otp->verify('482913')->status);
+            $this->assertSame(OtpStatus::Throttled, $otp->peek(self::CODE)->status);
+            $this->assertSame(OtpStatus::Throttled, $otp->verify(self::CODE)->status);
         } finally {
             $slot->release();
         }
 
-        $this->assertSame(OtpStatus::Matched, $otp->peek('482913')->status);
+        $this->assertSame(OtpStatus::Matched, $otp->peek(self::CODE)->status);
     }
 }

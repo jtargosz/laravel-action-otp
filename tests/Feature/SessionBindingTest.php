@@ -2,7 +2,6 @@
 
 namespace Jtargosz\ActionOtp\Tests\Feature;
 
-use Illuminate\Support\Facades\Notification;
 use Jtargosz\ActionOtp\Facades\ActionOtp;
 use Jtargosz\ActionOtp\Support\OtpStatus;
 use Jtargosz\ActionOtp\Tests\Fixtures\ConfirmLoginAction;
@@ -14,19 +13,15 @@ class SessionBindingTest extends TestCase
     {
         parent::setUp();
 
-        Notification::fake();
         config()->set('action-otp.send_cooldown', 0);
     }
 
-    private function sendFrom(string $browser, string $code, string $result = 'logged-in'): ?string
+    private function sendFrom(string $browser, string $code, string $payload = 'logged-in'): ?string
     {
         $this->browser($browser);
         $this->fixCode($code);
 
-        return ActionOtp::to('victim@example.com')->send(
-            new ConfirmLoginAction($result),
-            Notification::route('mail', 'victim@example.com')
-        )->challenge;
+        return $this->sendCode('victim@example.com', new ConfirmLoginAction($payload))->challenge;
     }
 
     public function test_same_session_verifies_without_a_token(): void
@@ -65,11 +60,8 @@ class SessionBindingTest extends TestCase
     public function test_attacker_send_cannot_replace_the_victims_action(): void
     {
         $this->sendFrom('a', '111111', 'victim-action');
-
-        // Attacker in another browser starts a flow for the victim's email.
         $this->sendFrom('b', '222222', 'attacker-action');
 
-        // The victim's browser still holds only the victim's own action.
         $this->browser('a');
         $this->assertSame(OtpStatus::Mismatch, ActionOtp::to('victim@example.com')->verify('222222')->status);
 

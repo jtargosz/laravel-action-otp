@@ -5,22 +5,39 @@ namespace Jtargosz\ActionOtp\Tests;
 use Illuminate\Http\Request;
 use Illuminate\Session\ArraySessionHandler;
 use Illuminate\Session\Store;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Notification;
 use Jtargosz\ActionOtp\ActionOtpServiceProvider;
 use Jtargosz\ActionOtp\Contracts\GeneratesCodes;
+use Jtargosz\ActionOtp\Contracts\VerifiableAction;
 use Jtargosz\ActionOtp\Facades\ActionOtp;
 use Jtargosz\ActionOtp\Support\ActionPolicy;
+use Jtargosz\ActionOtp\Support\Keys;
 use Jtargosz\ActionOtp\Support\OtpMessage;
+use Jtargosz\ActionOtp\Support\OtpResult;
 use Jtargosz\ActionOtp\Testing\FixedCodeGenerator;
+use Jtargosz\ActionOtp\Tests\Fixtures\ConfirmLoginAction;
 use Orchestra\Testbench\TestCase as Base;
 use RuntimeException;
 
 abstract class TestCase extends Base
 {
     /**
+     * Code used with fixCode() unless a test needs several different codes.
+     */
+    protected const CODE = '482913';
+
+    /**
      * @var array<string, Store>
      */
     private array $browsers = [];
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        Notification::fake();
+    }
 
     protected function tearDown(): void
     {
@@ -52,6 +69,25 @@ abstract class TestCase extends Base
         $this->app->instance(GeneratesCodes::class, new FixedCodeGenerator($code));
         $this->app->forgetInstance('action-otp');
         ActionOtp::clearResolvedInstance('action-otp');
+    }
+
+    /**
+     * Sends a code by mail to the identifier itself.
+     */
+    protected function sendCode(string $identifier, ?VerifiableAction $action = null, string $purpose = 'default'): OtpResult
+    {
+        return ActionOtp::to($identifier)->for($purpose)->send(
+            $action ?? new ConfirmLoginAction,
+            Notification::route('mail', $identifier)
+        );
+    }
+
+    /**
+     * Wrong attempts counted for an identifier.
+     */
+    protected function tries(string $identifier): int
+    {
+        return (int) Cache::get(Keys::identifier(Keys::hash($identifier), ':tries'), 0);
     }
 
     /**

@@ -5,7 +5,7 @@ namespace Jtargosz\ActionOtp\Http\Middleware;
 use Closure;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Date;
+use Illuminate\Support\Carbon;
 use Jtargosz\ActionOtp\Actions\ConfirmSession;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -30,7 +30,7 @@ class RequireOtpConfirmation
 
         $confirmedAt = (int) $request->session()->get(ConfirmSession::SESSION_KEY, 0);
 
-        if (Date::now()->unix() - $confirmedAt > $timeout) {
+        if (Carbon::now()->unix() - $confirmedAt > $timeout) {
             if ($request->expectsJson()) {
                 return new JsonResponse(['message' => (string) __('action-otp::action-otp.confirm_required')], 423);
             }

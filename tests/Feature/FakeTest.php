@@ -40,7 +40,6 @@ class FakeTest extends TestCase
 
     public function test_http_flow_without_touching_the_vault(): void
     {
-        Notification::fake();
         ActionOtp::fake('123456');
 
         $this->postJson('/register', ['email' => 'new@example.com'])->assertOk();
@@ -78,7 +77,7 @@ class FakeTest extends TestCase
         $this->browser();
         ActionOtp::fake();
 
-        ActionOtp::to('rnd@example.com')->send(new ConfirmLoginAction, Notification::route('mail', 'rnd@example.com'));
+        $this->sendCode('rnd@example.com');
 
         $code = ActionOtp::codeFor('rnd@example.com');
 
@@ -92,7 +91,7 @@ class FakeTest extends TestCase
         config()->set('action-otp.send_cooldown', 0);
         ActionOtp::fake();
 
-        ActionOtp::to('api@example.com')->send(new ConfirmLoginAction, Notification::route('mail', 'api@example.com'));
+        $this->sendCode('api@example.com');
 
         $token = ActionOtp::challengeFor('api@example.com');
 
@@ -112,7 +111,7 @@ class FakeTest extends TestCase
         $this->assertFails(fn () => ActionOtp::assertSent(ConfirmLoginAction::class));
 
         $this->browser();
-        ActionOtp::to('x@example.com')->send(new ConfirmLoginAction, Notification::route('mail', 'x@example.com'));
+        $this->sendCode('x@example.com');
 
         $this->assertFails(fn () => ActionOtp::assertSent(AnyDeviceAction::class));
         $this->assertFails(fn () => ActionOtp::assertSent(
@@ -129,7 +128,7 @@ class FakeTest extends TestCase
         ActionOtp::assertNothingSent();
         ActionOtp::assertNotSent(ConfirmLoginAction::class);
 
-        ActionOtp::to('x@example.com')->send(new ConfirmLoginAction, Notification::route('mail', 'x@example.com'));
+        $this->sendCode('x@example.com');
 
         $this->assertFails(fn () => ActionOtp::assertNothingSent());
         $this->assertFails(fn () => ActionOtp::assertNotSent(ConfirmLoginAction::class));

@@ -23,33 +23,33 @@ class ActionAttributesTest extends TestCase
     {
         parent::setUp();
 
-        Notification::fake();
         config()->set('action-otp.send_cooldown', 0);
         $this->browser();
     }
 
     public function test_ttl_attribute_overrides_config(): void
     {
-        $this->fixCode('482913');
+        $this->freezeTime();
+        $this->fixCode(self::CODE);
 
-        ActionOtp::to('ttl@example.com')->send(new ShortLivedAction, Notification::route('mail', 'ttl@example.com'));
+        $this->sendCode('ttl@example.com', new ShortLivedAction);
 
-        $this->assertEqualsWithDelta(now()->addMinute()->getTimestamp(), $this->lastMessage()->expiresAt->getTimestamp(), 3);
+        $this->assertSame(now()->addMinute()->getTimestamp(), $this->lastMessage()->expiresAt->getTimestamp());
 
         $this->travel(61)->seconds();
 
-        $this->assertSame(OtpStatus::Expired, ActionOtp::to('ttl@example.com')->verify('482913')->status);
+        $this->assertSame(OtpStatus::Expired, ActionOtp::to('ttl@example.com')->verify(self::CODE)->status);
     }
 
     public function test_format_and_length_attributes_are_inherited(): void
     {
-        ActionOtp::to('alpha@example.com')->send(new AlphaEightAction, Notification::route('mail', 'alpha@example.com'));
+        $this->sendCode('alpha@example.com', new AlphaEightAction);
         $this->assertMatchesRegularExpression('/^[A-Z]{8}$/', $this->lastMessage()->code);
 
-        ActionOtp::to('child@example.com')->send(new InheritsAlphaEightAction, Notification::route('mail', 'child@example.com'));
+        $this->sendCode('child@example.com', new InheritsAlphaEightAction);
         $this->assertMatchesRegularExpression('/^[A-Z]{8}$/', $this->lastMessage()->code);
 
-        ActionOtp::to('plain@example.com')->send(new ConfirmLoginAction, Notification::route('mail', 'plain@example.com'));
+        $this->sendCode('plain@example.com', new ConfirmLoginAction);
         $this->assertMatchesRegularExpression('/^[0-9]{6}$/', $this->lastMessage()->code);
     }
 
@@ -65,46 +65,35 @@ class ActionAttributesTest extends TestCase
     {
         $this->expectException(InvalidArgumentException::class);
 
-        ActionOtp::to('bad@example.com')->send(new BrokenSendWithAction, Notification::route('mail', 'bad@example.com'));
+        $this->sendCode('bad@example.com', new BrokenSendWithAction);
     }
 
     public function test_any_device_action_verifies_without_session_or_token(): void
     {
-        $this->fixCode('482913');
+        $this->fixCode(self::CODE);
 
-        ActionOtp::to('any@example.com')->send(new AnyDeviceAction, Notification::route('mail', 'any@example.com'));
+        $this->sendCode('any@example.com', new AnyDeviceAction);
 
         $this->noBrowser();
 
-        $result = ActionOtp::to('any@example.com')->verify('482913');
+        $result = ActionOtp::to('any@example.com')->verify(self::CODE);
 
         $this->assertTrue($result->ok());
         $this->assertSame('any-device', $result->payload);
-        $this->assertSame(OtpStatus::Empty, ActionOtp::to('any@example.com')->verify('482913')->status);
+        $this->assertSame(OtpStatus::Empty, ActionOtp::to('any@example.com')->verify(self::CODE)->status);
     }
 
     public function test_new_any_device_send_replaces_the_previous_one(): void
     {
         $this->fixCode('111111');
-        ActionOtp::to('any@example.com')->send(new AnyDeviceAction, Notification::route('mail', 'any@example.com'));
+        $this->sendCode('any@example.com', new AnyDeviceAction);
 
         $this->browser('b');
         $this->fixCode('222222');
-        ActionOtp::to('any@example.com')->send(new AnyDeviceAction, Notification::route('mail', 'any@example.com'));
+        $this->sendCode('any@example.com', new AnyDeviceAction);
 
         $this->noBrowser();
         $this->assertSame(OtpStatus::Mismatch, ActionOtp::to('any@example.com')->peek('111111')->status);
         $this->assertTrue(ActionOtp::to('any@example.com')->verify('222222')->ok());
-    }
-
-    public function test_action_without_attribute_still_needs_the_session(): void
-    {
-        $this->fixCode('482913');
-
-        ActionOtp::to('plain@example.com')->send(new ConfirmLoginAction, Notification::route('mail', 'plain@example.com'));
-
-        $this->noBrowser();
-
-        $this->assertSame(OtpStatus::Empty, ActionOtp::to('plain@example.com')->verify('482913')->status);
     }
 }

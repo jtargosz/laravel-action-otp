@@ -13,8 +13,6 @@ use Jtargosz\ActionOtp\Support\OtpMessage;
 /**
  * Default notification. Gets only the OtpMessage (code, expiry, purpose,
  * link), never the pending action, and is encrypted on the queue.
- *
- * Publish the view with `php artisan vendor:publish --tag=action-otp-views`.
  */
 class CodeMail extends Notification implements ShouldBeEncrypted, ShouldQueue
 {

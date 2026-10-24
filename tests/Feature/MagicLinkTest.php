@@ -3,7 +3,6 @@
 namespace Jtargosz\ActionOtp\Tests\Feature;
 
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\URL;
 use Jtargosz\ActionOtp\Facades\ActionOtp;
 use Jtargosz\ActionOtp\Support\Keys;
@@ -49,7 +48,7 @@ class MagicLinkTest extends HttpTestCase
         $this->get($link)->assertOk()->assertSee('Confirm page for default POST '.$link, false);
         $this->get($link)->assertOk();
 
-        $this->postJson('/otp/verify', ['identifier' => 'user@example.com', 'code' => '482913'])->assertOk();
+        $this->postJson('/otp/verify', ['identifier' => 'user@example.com', 'code' => self::CODE])->assertOk();
     }
 
     public function test_post_in_the_same_session_verifies(): void
@@ -79,7 +78,7 @@ class MagicLinkTest extends HttpTestCase
             ->assertJson(['status' => 'device_mismatch', 'message' => 'Open this link in the browser where you requested the code, or enter the code from the message there.']);
 
         // The record survives, so the code still works for whoever holds the challenge.
-        $this->postJson('/otp/verify', ['identifier' => 'user@example.com', 'code' => '482913', 'challenge' => $challenge])
+        $this->postJson('/otp/verify', ['identifier' => 'user@example.com', 'code' => self::CODE, 'challenge' => $challenge])
             ->assertOk();
     }
 
@@ -113,7 +112,7 @@ class MagicLinkTest extends HttpTestCase
 
         $this->postJson($forged)->assertStatus(422)->assertJson(['status' => 'mismatch']);
 
-        $this->assertSame(1, (int) Cache::get(Keys::identifier(Keys::hash('user@example.com'), ':tries')));
+        $this->assertSame(1, $this->tries('user@example.com'));
     }
 
     public function test_resend_issues_a_new_link(): void

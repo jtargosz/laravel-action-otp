@@ -1,6 +1,22 @@
 # Changelog
 
-## 2.0.0 - Unreleased
+## 2.1.0 - 2026-10-24
+
+Added:
+
+- `ActionOtp::identifyUsing()` picks the identifier for the `verify` and `resend` routes on the server. The request field is then ignored, and a resolver returning `null` answers `empty` without counting an attempt
+
+Fixed:
+
+- `ValidOtpCode` with a blank purpose fails validation instead of throwing
+- `otp.confirm` marks the session on the request inside the package controllers (code, magic link, verify route) instead of the global `request()` in `ConfirmSession::handle()`. Verifying a `ConfirmSession` outside the package routes no longer needs a session. Code that verified `ConfirmSession` manually must now set `ConfirmSession::SESSION_KEY` itself
+
+Changed:
+
+- Reworded pl and de translations
+- `ActionOtpFake` no longer takes an unused `Recorder` constructor argument
+
+## 2.0.0 - 2026-10-02
 
 Breaking changes, see [UPGRADE.md](UPGRADE.md):
 

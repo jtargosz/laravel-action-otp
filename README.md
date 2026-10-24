@@ -21,39 +21,14 @@ ActionOtp::to($email)->for('password-reset')->send(new ResetPasswordAction($emai
 $result = ActionOtp::to($email)->for('password-reset')->verify($code);
 ```
 
-## Contents
-
-- [Why this package](#why-this-package)
-- [Requirements](#requirements)
-- [Install](#install)
-- [Quick start](#quick-start)
-- [API](#api)
-- [Browsers, API clients and purposes](#browsers-api-clients-and-purposes)
-- [Per action settings](#per-action-settings)
-- [Examples](#examples)
-- [Routes, magic link and otp.confirm](#routes-magic-link-and-otpconfirm)
-- [Notifications and SMS](#notifications-and-sms)
-- [Config](#config)
-- [Security](#security)
-- [Testing](#testing)
-- [Use with Laravel AI SDK](#use-with-laravel-ai-sdk)
-- [Translations](#translations)
-- [Upgrading from 1.x](#upgrading-from-1x)
-- [Contributing](#contributing)
-- [License](#license)
-
 ## Why this package
 
-- The code is tied to an action class. `handle()` runs exactly once, only after a correct code. Nothing is created or changed before that.
-- Each code is bound to the browser session (or API token) that asked for it. Someone who knows your email cannot replace your pending action or confirm theirs with your code.
-- Several pending actions per identifier: a password reset does not cancel a pending registration.
-- No database tables. Codes live in cache and clean up after themselves.
-- Throttling, lockout, send cooldown and expiry built in.
-- Per action settings with attributes: lifetime, code format, notification class.
-- Translated mail in 8 languages, SMS text with iOS and Android autofill.
-- `ActionOtp::fake()` for tests, optional routes, scanner-safe magic link and an `otp.confirm` middleware.
+- `handle()` runs exactly once, only after a correct code. Nothing is created or changed before that.
+- Each code is bound to the browser session or API token that asked for it, see [Security](#security).
+- No database tables. Codes live in cache, with throttling, lockout, cooldown and expiry built in.
+- Per action attributes, `ActionOtp::fake()`, optional routes with a magic link and an `otp.confirm` middleware, mail in 8 languages.
 
-How it compares, honestly:
+## Alternatives
 
 | | This package | [spatie/laravel-one-time-passwords](https://github.com/spatie/laravel-one-time-passwords) | [benbjurstrom/otpz](https://github.com/benbjurstrom/otpz) | [tzsk/otp](https://github.com/tzsk/otp) |
 | --- | --- | --- | --- | --- |
@@ -62,8 +37,6 @@ How it compares, honestly:
 | Storage | Cache | Database | Database | Cache |
 | Bound to | Session or challenge token | IP and user agent | Session | Nothing |
 | UI | None, Blade examples below | Livewire component | Starter kit pages | None |
-
-If you want a ready-made passwordless login screen, spatie or otpz fit better. If you need "do X only after the user proves they own this email or phone", this package is the shorter path.
 
 This is not TOTP (authenticator apps) and not a replacement for passkeys.
 
@@ -243,6 +216,7 @@ ActionOtp::to($email)->for('register')->verify($code);
 Attributes on the action class override the config. They are inherited by subclasses.
 
 ```php
+use Jtargosz\ActionOtp\Attributes\AnyDevice;
 use Jtargosz\ActionOtp\Attributes\CodeFormat;
 use Jtargosz\ActionOtp\Attributes\CodeLength;
 use Jtargosz\ActionOtp\Attributes\SendWith;
@@ -270,13 +244,10 @@ class ChangeEmailAction implements VerifiableAction { /* ... */ }
 
 ## Examples
 
-Login with 2FA. Send to the User model, log in after verify:
+Login with 2FA. Send to the User model as in the API flow above, `ConfirmLoginAction::handle()` returns the user id:
 
 ```php
 use Illuminate\Support\Facades\Auth;
-use Jtargosz\ActionOtp\Facades\ActionOtp;
-
-ActionOtp::to($user->email)->for('login')->send(new ConfirmLoginAction($user->id), $user);
 
 $result = ActionOtp::to($user->email)->for('login')->verify($code);
 
@@ -285,11 +256,10 @@ if ($result->ok()) {
 }
 ```
 
-Password reset. The password changes only after verify:
+Password reset. The password changes only after verify. Send it as in the snippet at the top of this file:
 
 ```php
 use App\Models\User;
-use Illuminate\Support\Facades\Hash;
 use Jtargosz\ActionOtp\Contracts\VerifiableAction;
 
 class ResetPasswordAction implements VerifiableAction
@@ -306,11 +276,6 @@ class ResetPasswordAction implements VerifiableAction
         return $user;
     }
 }
-
-ActionOtp::to($email)->for('password-reset')->send(
-    new ResetPasswordAction($email, Hash::make($password)),
-    Notification::route('mail', $email)
-);
 ```
 
 Resend a fresh code when the message got lost. Honors the send cooldown:
@@ -352,7 +317,7 @@ $request->validate([
 ]);
 ```
 
-The third argument takes a challenge for API clients. The rule uses `peek()`, so the code stays valid until you call `verify()`. A wrong code counts as an attempt, so a failed validation followed by a failed `verify()` burns two tries. Arrays, numbers and a missing identifier fail without counting.
+The third argument takes a challenge for API clients. The rule uses `peek()`: the code stays valid for `verify()`, but a wrong code counts as an attempt.
 
 The code field. `autocomplete="one-time-code"` lets browsers offer the code from SMS:
 
@@ -389,6 +354,13 @@ ActionOtp::routes(); // prefix "otp", middleware ["web"]
 
 All routes are rate limited to `rate_limit` requests per minute per IP.
 
+By default `verify` and `resend` take the `identifier` from the request. To pick it on the server instead, register a resolver. The request field is then ignored and not required, and `null` answers `empty` without counting an attempt:
+
+```php
+// AppServiceProvider::boot()
+ActionOtp::identifyUsing(fn (Request $request) => $request->session()->get('login.email'));
+```
+
 Responses: JSON requests get `{status, message}` with 200, 409 (`device_mismatch`), 422 or 429. The payload is never serialized. If `handle()` returns a `Responsable` or `Response`, it is sent as is. Browser requests redirect to the intended URL (fallback `redirects.verified`) with a `status` flash, or back with a `code` error. To change this, bind your own `Jtargosz\ActionOtp\Contracts\VerifyResponse` in a service provider.
 
 ### Magic link
@@ -409,7 +381,7 @@ ActionOtp::linkView('auth.otp-link');
 </form>
 ```
 
-Opening the link only shows this page. Mail scanners that follow links consume nothing, the POST from the page does the work. The link works in the browser that started the flow. Anywhere else the user gets `device_mismatch` and types the code in the original browser instead, unless the action has `#[AnyDevice]`. A wrong link token counts as an attempt.
+Opening the link only shows this page. Mail scanners that follow links consume nothing, the POST from the page does the work. The link works in the browser that started the flow. Anywhere else the user gets `device_mismatch` and types the code in the original browser instead, unless the action has `#[AnyDevice]`. A link that was already used also returns `device_mismatch`, since the browser no longer holds a pending code. An old link after `resend()` is a wrong link token: `mismatch`, and it counts as an attempt.
 
 ### otp.confirm
 
@@ -446,7 +418,7 @@ ActionOtp::confirmUsing(fn ($user) => $user->phone); // optional, default: email
 </form>
 ```
 
-Unconfirmed JSON requests get 423, browser requests are redirected to `/otp/confirm`. After a correct code the confirmation lasts `confirm_timeout` seconds (default 900). Only GET requests are remembered as the intended URL, same as Laravel's `password.confirm`.
+Unconfirmed JSON requests get 423, browser requests are redirected to `/otp/confirm`. After a correct code (or the magic link, when enabled) the confirmation lasts `confirm_timeout` seconds (default 900). Only GET requests are remembered as the intended URL, same as Laravel's `password.confirm`.
 
 ## Notifications and SMS
 
@@ -514,25 +486,23 @@ Keep actions serializable. Most cache drivers serialize records, so avoid closur
 
 File `config/action-otp.php`:
 
-| Key | Default | Meaning |
-| --- | --- | --- |
-| `code_format` | `numeric` | `numeric`, `alpha` or `alphanumeric` |
-| `code_length` | `6` | Code length (1-64) |
-| `ttl_minutes` | `15` | Code lifetime |
-| `expired_grace_minutes` | `5` | How long an expired code stays readable as `expired` (0 disables) |
-| `max_attempts` | `5` | Wrong tries before lock |
-| `throttle_seconds` | `60` | Lock duration (0 disables the lock) |
-| `send_cooldown` | `30` | Min seconds between sends per identifier (0 disables) |
-| `store_prefix` | `action-otp:` | Cache key prefix |
-| `notification` | `CodeMail::class` | Notification class |
-| `channels` | `['mail']` | Channels of the default `CodeMail` |
-| `sms_host` | `null` | Host for the SMS autofill line, falls back to `app.url` |
-| `link.enabled` | `false` | Magic link in the default mail |
-| `rate_limit` | `10` | Requests per minute per IP on the package routes |
-| `confirm_timeout` | `900` | Seconds an `otp.confirm` confirmation lasts |
-| `redirects.verified` | `/` | Fallback redirect after verify on the package routes |
-
-Env keys: `ACTION_OTP_FORMAT`, `ACTION_OTP_LENGTH`, `ACTION_OTP_TTL`, `ACTION_OTP_GRACE`, `ACTION_OTP_ATTEMPTS`, `ACTION_OTP_THROTTLE`, `ACTION_OTP_COOLDOWN`, `ACTION_OTP_PREFIX`, `ACTION_OTP_SMS_HOST`, `ACTION_OTP_LINK`, `ACTION_OTP_RATE_LIMIT`, `ACTION_OTP_CONFIRM_TIMEOUT`.
+| Key | Env | Default | Meaning |
+| --- | --- | --- | --- |
+| `code_format` | `ACTION_OTP_FORMAT` | `numeric` | `numeric`, `alpha` or `alphanumeric` |
+| `code_length` | `ACTION_OTP_LENGTH` | `6` | Code length (1-64) |
+| `ttl_minutes` | `ACTION_OTP_TTL` | `15` | Code lifetime |
+| `expired_grace_minutes` | `ACTION_OTP_GRACE` | `5` | How long an expired code stays readable as `expired` (0 disables) |
+| `max_attempts` | `ACTION_OTP_ATTEMPTS` | `5` | Wrong tries before lock |
+| `throttle_seconds` | `ACTION_OTP_THROTTLE` | `60` | Lock duration (0 disables the lock) |
+| `send_cooldown` | `ACTION_OTP_COOLDOWN` | `30` | Min seconds between sends per identifier (0 disables) |
+| `store_prefix` | `ACTION_OTP_PREFIX` | `action-otp:` | Cache key prefix |
+| `notification` | | `CodeMail::class` | Notification class |
+| `channels` | | `['mail']` | Channels of the default `CodeMail` |
+| `sms_host` | `ACTION_OTP_SMS_HOST` | `null` | Host for the SMS autofill line, falls back to `app.url` |
+| `link.enabled` | `ACTION_OTP_LINK` | `false` | Magic link in the default mail |
+| `rate_limit` | `ACTION_OTP_RATE_LIMIT` | `10` | Requests per minute per IP on the package routes |
+| `confirm_timeout` | `ACTION_OTP_CONFIRM_TIMEOUT` | `900` | Seconds an `otp.confirm` confirmation lasts |
+| `redirects.verified` | | `/` | Fallback redirect after verify on the package routes |
 
 ## Security
 
@@ -541,13 +511,21 @@ Env keys: `ACTION_OTP_FORMAT`, `ACTION_OTP_LENGTH`, `ACTION_OTP_TTL`, `ACTION_OT
 - After `max_attempts` wrong tries the identifier is locked for `throttle_seconds`, across all purposes. Wrong tries count over a one hour window, across codes: `send()` and `resend()` never reset the count or lift the lock. Once the limit is reached, each further wrong try in that window locks again. Only a successful verify resets the counters, lockout and cooldown. `clear()` and expiry keep them, so a public "cancel" endpoint cannot lift the limits.
 - Every operation on an identifier runs under one lock, so parallel requests cannot run `handle()` twice, slip past the attempt limit or skip the send cooldown.
 - A missing or wrong challenge returns `empty` and does not count as an attempt. Wrong codes do count per identifier, whichever session they come from, and sends share one cooldown per identifier. So someone who can start a flow for an identifier can trigger its lockout or cooldown (not bypass it). Protect your send routes with Laravel rate limiting. The examples in this file ship with `throttle` middleware, keep it or tighten it.
+- The package `verify` and `resend` routes trust the `identifier` from the request unless you register `ActionOtp::identifyUsing()`. If these routes are public, take the identifier from the session or the logged-in user instead.
 - Statuses tell `empty` apart from `mismatch`. Within one session this shows whether a code is pending. If that matters, map both to one message.
 - The pending action waits in cache until verified, including any data you pass to it. Treat the cache as trusted storage, keep `ttl_minutes` short and hash passwords before they go into an action.
 - The default `CodeMail` never puts the action into the queue payload and is encrypted on the queue. Events carry no code and no action.
 - The magic link GET page consumes nothing, only the POST does, and it is signed and expires with the code.
 - `#[AnyDevice]` removes the session binding for that action. Read the warning in [Per action settings](#per-action-settings).
 - Cache keys start with `store_prefix`. If several apps share one cache backend, set a unique `ACTION_OTP_PREFIX` per app.
-- Events `CodeSent`, `CodeVerified` and `CodeFailed` are dispatched for logs and metrics.
+
+## Events
+
+For logs and metrics, in `Jtargosz\ActionOtp\Events`:
+
+- `CodeSent(identifier, purpose, expiresAt)`
+- `CodeVerified(identifier, purpose, payload)`
+- `CodeFailed(identifier, purpose)`
 
 ## Testing
 
@@ -573,7 +551,7 @@ public function test_registration_requires_the_code(): void
 }
 ```
 
-Assertions: `assertSent`, `assertSentTimes`, `assertNotSent`, `assertNothingSent`, `assertVerified`, `assertNotVerified`. Helpers: `codeFor`, `challengeFor` (for API flows), `messageFor`. Use an array cache in tests.
+Assertions: `assertSent`, `assertSentTimes`, `assertNotSent`, `assertNothingSent`, `assertVerified`, `assertNotVerified`. Helpers: `codeFor`, `challengeFor` (for API flows), `messageFor`. In tests the array cache is fine, everything runs in one process.
 
 ## Use with Laravel AI SDK
 
@@ -600,7 +578,7 @@ Expose these tools only to authenticated agents acting for that user.
 
 ## Translations
 
-Ships with `en`, `pl`, `it`, `es`, `de`, `fr`, `pt` and `nl`: statuses, the mail and the SMS text. Messages follow the app locale. Publish with tag `action-otp-lang` and edit the files in `lang/vendor/action-otp/{locale}/action-otp.php`. To add a language, copy the `en` file to `lang/vendor/action-otp/{locale}/action-otp.php` with the same keys.
+Ships with `en`, `pl`, `it`, `es`, `de`, `fr`, `pt` and `nl`: statuses, the mail and the SMS text. Messages follow the app locale. Publish with `php artisan vendor:publish --tag=action-otp-lang`, then edit or add `lang/vendor/action-otp/{locale}/action-otp.php` with the keys from `en`.
 
 ## Upgrading from 1.x
 

@@ -3,6 +3,7 @@
 namespace Jtargosz\ActionOtp\Facades;
 
 use Closure;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Facade;
 use Jtargosz\ActionOtp\Contracts\GeneratesCodes;
 use Jtargosz\ActionOtp\Contracts\ManagesCodes;
@@ -78,6 +79,18 @@ class ActionOtp extends Facade
     public static function confirmUsing(Closure $resolver): void
     {
         app()->instance('action-otp.confirm.identifier', $resolver);
+    }
+
+    /**
+     * Picks the identifier for the verify and resend routes on the server, for
+     * example from the session. The request's "identifier" field is then
+     * ignored. Return null when there is no flow; the route answers "empty".
+     *
+     * @param  Closure(Request): (string|int|null)  $resolver
+     */
+    public static function identifyUsing(Closure $resolver): void
+    {
+        app()->instance('action-otp.identifier', $resolver);
     }
 
     /**

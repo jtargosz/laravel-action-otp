@@ -25,11 +25,11 @@ class RoutesTest extends HttpTestCase
             ->assertStatus(422)
             ->assertExactJson(['status' => 'mismatch', 'message' => 'Code does not match.']);
 
-        $this->verify('482913')
+        $this->verify(self::CODE)
             ->assertOk()
             ->assertExactJson(['status' => 'verified', 'message' => 'Code accepted.']);
 
-        $this->verify('482913')->assertStatus(422)->assertJson(['status' => 'empty']);
+        $this->verify(self::CODE)->assertStatus(422)->assertJson(['status' => 'empty']);
     }
 
     public function test_json_statuses_for_throttled_expired_and_other_session(): void
@@ -37,11 +37,11 @@ class RoutesTest extends HttpTestCase
         $this->start();
 
         $this->flushSession();
-        $this->verify('482913')->assertStatus(422)->assertJson(['status' => 'empty']);
+        $this->verify(self::CODE)->assertStatus(422)->assertJson(['status' => 'empty']);
 
         $this->start(['email' => 'late@example.com']);
         $this->travel(16)->minutes();
-        $this->postJson('/otp/verify', ['identifier' => 'late@example.com', 'code' => '482913'])
+        $this->postJson('/otp/verify', ['identifier' => 'late@example.com', 'code' => self::CODE])
             ->assertStatus(422)
             ->assertJson(['status' => 'expired']);
 
@@ -49,7 +49,7 @@ class RoutesTest extends HttpTestCase
         for ($i = 0; $i < 3; $i++) {
             $this->postJson('/otp/verify', ['identifier' => 'locked@example.com', 'code' => '000000']);
         }
-        $this->postJson('/otp/verify', ['identifier' => 'locked@example.com', 'code' => '482913'])
+        $this->postJson('/otp/verify', ['identifier' => 'locked@example.com', 'code' => self::CODE])
             ->assertStatus(429)
             ->assertJson(['status' => 'throttled']);
     }
@@ -59,8 +59,8 @@ class RoutesTest extends HttpTestCase
         $challenge = $this->start(['purpose' => 'signup']);
         $this->flushSession();
 
-        $this->verify('482913', ['purpose' => 'signup'])->assertStatus(422);
-        $this->verify('482913', ['purpose' => 'signup', 'challenge' => $challenge])->assertOk();
+        $this->verify(self::CODE, ['purpose' => 'signup'])->assertStatus(422);
+        $this->verify(self::CODE, ['purpose' => 'signup', 'challenge' => $challenge])->assertOk();
     }
 
     public function test_web_verify_redirects(): void
@@ -74,7 +74,7 @@ class RoutesTest extends HttpTestCase
 
         $this->session(['url.intended' => '/dashboard']);
 
-        $this->post('/otp/verify', ['identifier' => 'user@example.com', 'code' => '482913'])
+        $this->post('/otp/verify', ['identifier' => 'user@example.com', 'code' => self::CODE])
             ->assertRedirect('/dashboard')
             ->assertSessionHas('status', 'Code accepted.');
     }
@@ -84,7 +84,7 @@ class RoutesTest extends HttpTestCase
         config()->set('action-otp.redirects.verified', '/welcome');
         $this->start();
 
-        $this->post('/otp/verify', ['identifier' => 'user@example.com', 'code' => '482913'])
+        $this->post('/otp/verify', ['identifier' => 'user@example.com', 'code' => self::CODE])
             ->assertRedirect('/welcome');
     }
 
@@ -92,7 +92,7 @@ class RoutesTest extends HttpTestCase
     {
         $this->start(['action' => 'response']);
 
-        $this->verify('482913')->assertStatus(201)->assertExactJson(['custom' => true]);
+        $this->verify(self::CODE)->assertStatus(201)->assertExactJson(['custom' => true]);
     }
 
     public function test_validation_errors(): void
@@ -119,7 +119,7 @@ class RoutesTest extends HttpTestCase
             ->assertOk()
             ->assertJson(['status' => 'sent']);
 
-        $this->verify('482913')->assertStatus(422);
+        $this->verify(self::CODE)->assertStatus(422);
         $this->verify('777777')->assertOk();
 
         $this->postJson('/otp/resend', ['identifier' => 'user@example.com'])
@@ -158,6 +158,6 @@ class RoutesTest extends HttpTestCase
 
         $this->start();
 
-        $this->verify('482913')->assertStatus(299)->assertExactJson(['custom' => 'verified']);
+        $this->verify(self::CODE)->assertStatus(299)->assertExactJson(['custom' => 'verified']);
     }
 }

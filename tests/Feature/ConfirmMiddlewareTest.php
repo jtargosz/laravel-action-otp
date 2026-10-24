@@ -61,10 +61,44 @@ class ConfirmMiddlewareTest extends HttpTestCase
         Notification::assertSentTo($this->user, CodeMail::class, fn (CodeMail $mail) => $mail->otp->purpose === ConfirmSession::PURPOSE);
 
         $this->post('/otp/confirm', ['code' => '000000'])->assertSessionHasErrors('code');
-        $this->post('/otp/confirm', ['code' => '482913'])->assertRedirect('/settings');
+        $this->post('/otp/confirm', ['code' => self::CODE])->assertRedirect('/settings');
 
         $this->get('/settings')->assertOk()->assertSee('settings');
         $this->delete('/account')->assertOk()->assertSee('deleted');
+    }
+
+    public function test_magic_link_confirms_the_session(): void
+    {
+        config()->set('action-otp.link.enabled', true);
+
+        $this->get('/otp/confirm')->assertOk();
+
+        $link = null;
+        Notification::assertSentTo($this->user, CodeMail::class, function (CodeMail $mail) use (&$link) {
+            $link = $mail->otp->link;
+
+            return true;
+        });
+        $this->assertIsString($link);
+
+        $this->postJson($link)->assertOk()->assertJson(['status' => 'verified']);
+
+        $this->get('/settings')->assertOk()->assertSee('settings');
+    }
+
+    public function test_confirm_action_runs_without_a_request_session(): void
+    {
+        $this->noBrowser();
+
+        $send = $this->sendCode('owner@example.com', new ConfirmSession, ConfirmSession::PURPOSE);
+
+        $result = ActionOtp::to('owner@example.com')
+            ->for(ConfirmSession::PURPOSE)
+            ->withChallenge($send->challenge)
+            ->verify(self::CODE);
+
+        $this->assertTrue($result->ok());
+        $this->assertTrue($result->payload);
     }
 
     public function test_code_is_sent_once_per_session(): void
@@ -79,7 +113,7 @@ class ConfirmMiddlewareTest extends HttpTestCase
     public function test_confirmation_expires_after_the_timeout(): void
     {
         $this->get('/otp/confirm');
-        $this->postJson('/otp/confirm', ['code' => '482913'])->assertOk();
+        $this->postJson('/otp/confirm', ['code' => self::CODE])->assertOk();
 
         $this->delete('/account')->assertOk();
         $this->get('/short')->assertOk();
@@ -105,9 +139,18 @@ class ConfirmMiddlewareTest extends HttpTestCase
         $this->postJson('/otp/confirm', ['code' => '777777'])->assertOk();
     }
 
+    public function test_confirm_resend_without_a_pending_code_is_empty(): void
+    {
+        $this->postJson('/otp/confirm/resend')
+            ->assertStatus(422)
+            ->assertJson(['status' => 'empty']);
+
+        Notification::assertNothingSent();
+    }
+
     public function test_identifier_comes_from_the_user_or_the_resolver(): void
     {
-        $fake = ActionOtp::fake('482913');
+        $fake = ActionOtp::fake(self::CODE);
 
         $this->get('/otp/confirm');
         $fake->assertSent(ConfirmSession::class, fn ($action, $message, string $identifier) => $identifier === 'owner@example.com');
@@ -122,9 +165,8 @@ class ConfirmMiddlewareTest extends HttpTestCase
 
     public function test_other_confirmation_flows_do_not_mark_the_session(): void
     {
-        // A regular code for the same identifier must not satisfy otp.confirm.
         $this->postJson('/start', ['email' => 'owner@example.com']);
-        $this->postJson('/otp/verify', ['identifier' => 'owner@example.com', 'code' => '482913'])->assertOk();
+        $this->postJson('/otp/verify', ['identifier' => 'owner@example.com', 'code' => self::CODE])->assertOk();
 
         $this->delete('/account')->assertRedirect('/otp/confirm');
     }

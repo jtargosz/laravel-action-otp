@@ -48,8 +48,7 @@ abstract class HttpTestCase extends TestCase
     {
         parent::setUp();
 
-        Notification::fake();
-        $this->fixCode('482913');
+        $this->fixCode(self::CODE);
     }
 
     /**

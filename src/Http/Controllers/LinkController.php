@@ -35,6 +35,8 @@ class LinkController extends Controller
             ->for($purpose)
             ->verifyLink($token);
 
+        $this->rememberConfirmation($request, $purpose, $result);
+
         return $response->toResponse($request, $result);
     }
 

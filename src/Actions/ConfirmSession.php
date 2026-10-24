@@ -2,12 +2,11 @@
 
 namespace Jtargosz\ActionOtp\Actions;
 
-use Illuminate\Support\Facades\Date;
 use Jtargosz\ActionOtp\Contracts\VerifiableAction;
 
 /**
- * Built-in action behind the otp.confirm middleware: marks the current
- * session as confirmed.
+ * Built-in action behind the otp.confirm middleware. The package controllers
+ * mark the session after it is verified.
  */
 final class ConfirmSession implements VerifiableAction
 {
@@ -17,8 +16,6 @@ final class ConfirmSession implements VerifiableAction
 
     public function handle(): mixed
     {
-        request()->session()->put(self::SESSION_KEY, Date::now()->unix());
-
         return true;
     }
 }

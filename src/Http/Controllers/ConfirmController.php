@@ -41,7 +41,11 @@ class ConfirmController extends Controller
 
         [$identifier] = $this->identify($request);
 
-        return $response->toResponse($request, $this->otp($identifier)->verify($data['code']));
+        $result = $this->otp($identifier)->verify($data['code']);
+
+        $this->rememberConfirmation($request, ConfirmSession::PURPOSE, $result);
+
+        return $response->toResponse($request, $result);
     }
 
     public function resend(Request $request): Response

@@ -88,7 +88,6 @@ class ReadmeTest extends TestCase
 
     public function test_quick_start_with_real_notifications(): void
     {
-        Notification::fake();
         $this->fixCode('482913');
 
         $this->postJson('/register', ['name' => 'Ann', 'email' => 'Ann@Example.com', 'password' => 'secret123'])

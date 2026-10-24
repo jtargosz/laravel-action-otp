@@ -28,18 +28,14 @@ class CodeFlowTest extends TestCase
     {
         parent::setUp();
 
-        Notification::fake();
         $this->noBrowser();
     }
 
     public function test_api_flow_with_challenge_token(): void
     {
-        $this->fixCode('482913');
+        $this->fixCode(self::CODE);
 
-        $send = ActionOtp::to('user@example.com')->send(
-            new ConfirmLoginAction,
-            Notification::route('mail', 'user@example.com')
-        );
+        $send = $this->sendCode('user@example.com');
 
         $this->assertSame(OtpStatus::Sent, $send->status);
         $this->assertIsString($send->challenge);
@@ -48,34 +44,31 @@ class CodeFlowTest extends TestCase
         $otp = ActionOtp::to('user@example.com')->withChallenge($send->challenge);
 
         $this->assertSame(OtpStatus::Mismatch, $otp->peek('000000')->status);
-        $this->assertSame(OtpStatus::Matched, $otp->peek('482913')->status);
+        $this->assertSame(OtpStatus::Matched, $otp->peek(self::CODE)->status);
 
-        $done = $otp->verify('482913');
+        $done = $otp->verify(self::CODE);
         $this->assertTrue($done->ok());
         $this->assertSame('logged-in', $done->payload);
 
-        $this->assertSame(OtpStatus::Empty, $otp->peek('482913')->status);
+        $this->assertSame(OtpStatus::Empty, $otp->peek(self::CODE)->status);
     }
 
     public function test_missing_or_wrong_challenge_is_empty_and_not_an_attempt(): void
     {
-        $this->fixCode('482913');
+        $this->fixCode(self::CODE);
 
-        $send = ActionOtp::to('token@example.com')->send(
-            new ConfirmLoginAction,
-            Notification::route('mail', 'token@example.com')
-        );
+        $send = $this->sendCode('token@example.com');
 
         for ($i = 0; $i < 5; $i++) {
-            $this->assertSame(OtpStatus::Empty, ActionOtp::to('token@example.com')->verify('482913')->status);
+            $this->assertSame(OtpStatus::Empty, ActionOtp::to('token@example.com')->verify(self::CODE)->status);
             $this->assertSame(
                 OtpStatus::Empty,
-                ActionOtp::to('token@example.com')->withChallenge('forged')->verify('482913')->status
+                ActionOtp::to('token@example.com')->withChallenge('forged')->verify(self::CODE)->status
             );
         }
 
         $this->assertTrue(
-            ActionOtp::to('token@example.com')->withChallenge($send->challenge)->verify('482913')->ok()
+            ActionOtp::to('token@example.com')->withChallenge($send->challenge)->verify(self::CODE)->ok()
         );
     }
 
@@ -84,10 +77,7 @@ class CodeFlowTest extends TestCase
         config()->set('action-otp.send_cooldown', 0);
 
         $this->fixCode('111111');
-        $send = ActionOtp::to('again@example.com')->send(
-            new ConfirmLoginAction,
-            Notification::route('mail', 'again@example.com')
-        );
+        $send = $this->sendCode('again@example.com');
 
         $this->fixCode('222222');
         $otp = ActionOtp::to('again@example.com')->withChallenge($send->challenge);
@@ -101,10 +91,7 @@ class CodeFlowTest extends TestCase
     {
         $this->fixCode('012345');
 
-        $send = ActionOtp::to('zero@example.com')->send(
-            new ConfirmLoginAction,
-            Notification::route('mail', 'zero@example.com')
-        );
+        $send = $this->sendCode('zero@example.com');
 
         $this->assertTrue(
             ActionOtp::to('zero@example.com')->withChallenge($send->challenge)->verify('012345')->ok()
@@ -115,10 +102,7 @@ class CodeFlowTest extends TestCase
     {
         $this->fixCode('AB12CD');
 
-        $send = ActionOtp::to('alnum@example.com')->send(
-            new AlphanumericAction,
-            Notification::route('mail', 'alnum@example.com')
-        );
+        $send = $this->sendCode('alnum@example.com', new AlphanumericAction);
 
         $this->assertTrue(
             ActionOtp::to('alnum@example.com')->withChallenge($send->challenge)->verify(' ab12cd ')->ok()
@@ -127,39 +111,33 @@ class CodeFlowTest extends TestCase
 
     public function test_code_is_consumed_before_a_throwing_handle(): void
     {
-        $this->fixCode('482913');
+        $this->fixCode(self::CODE);
 
-        $send = ActionOtp::to('boom@example.com')->send(
-            new ThrowingAction,
-            Notification::route('mail', 'boom@example.com')
-        );
+        $send = $this->sendCode('boom@example.com', new ThrowingAction);
 
         $otp = ActionOtp::to('boom@example.com')->withChallenge($send->challenge);
 
         try {
-            $otp->verify('482913');
+            $otp->verify(self::CODE);
             $this->fail('Expected RuntimeException.');
         } catch (RuntimeException) {
         }
 
-        $this->assertSame(OtpStatus::Empty, $otp->verify('482913')->status);
+        $this->assertSame(OtpStatus::Empty, $otp->verify(self::CODE)->status);
     }
 
     public function test_expired_code_is_rejected_and_removed(): void
     {
-        $this->fixCode('482913');
+        $this->fixCode(self::CODE);
 
-        $send = ActionOtp::to('old@example.com')->send(
-            new ConfirmLoginAction,
-            Notification::route('mail', 'old@example.com')
-        );
+        $send = $this->sendCode('old@example.com');
 
         $this->travel(16)->minutes();
 
         $otp = ActionOtp::to('old@example.com')->withChallenge($send->challenge);
 
-        $this->assertSame(OtpStatus::Expired, $otp->peek('482913')->status);
-        $this->assertSame(OtpStatus::Empty, $otp->peek('482913')->status);
+        $this->assertSame(OtpStatus::Expired, $otp->peek(self::CODE)->status);
+        $this->assertSame(OtpStatus::Empty, $otp->peek(self::CODE)->status);
     }
 
     public function test_malformed_record_fails_closed(): void
@@ -193,10 +171,7 @@ class CodeFlowTest extends TestCase
 
         $this->expectException(InvalidArgumentException::class);
 
-        ActionOtp::to('bad@example.com')->send(
-            new ConfirmLoginAction,
-            Notification::route('mail', 'bad@example.com')
-        );
+        $this->sendCode('bad@example.com');
     }
 
     public function test_notifiable_without_notify_throws(): void
@@ -208,12 +183,7 @@ class CodeFlowTest extends TestCase
 
     public function test_messages_are_translated(): void
     {
-        $send = ActionOtp::to('lang@example.com')->send(
-            new ConfirmLoginAction,
-            Notification::route('mail', 'lang@example.com')
-        );
-
-        $this->assertSame('We sent a verification code.', $send->message);
+        $send = $this->sendCode('lang@example.com');
 
         app()->setLocale('pl');
 
@@ -225,12 +195,9 @@ class CodeFlowTest extends TestCase
 
     public function test_queued_mail_carries_only_the_message(): void
     {
-        $this->fixCode('482913');
+        $this->fixCode(self::CODE);
 
-        ActionOtp::to('queue@example.com')->send(
-            new SecretHoldingAction,
-            Notification::route('mail', 'queue@example.com')
-        );
+        $this->sendCode('queue@example.com', new SecretHoldingAction);
 
         Notification::assertSentOnDemand(CodeMail::class, function (CodeMail $mail) {
             $payload = serialize($mail);
@@ -238,7 +205,7 @@ class CodeFlowTest extends TestCase
             $this->assertInstanceOf(ShouldBeEncrypted::class, $mail);
             $this->assertStringNotContainsString('top-secret-value', $payload);
             $this->assertStringNotContainsString(SecretHoldingAction::class, $payload);
-            $this->assertSame('482913', $mail->otp->code);
+            $this->assertSame(self::CODE, $mail->otp->code);
 
             return true;
         });
@@ -246,22 +213,19 @@ class CodeFlowTest extends TestCase
 
     public function test_integer_identifier(): void
     {
-        $this->fixCode('482913');
+        $this->fixCode(self::CODE);
 
         $send = ActionOtp::to(12345)->send(
             new ConfirmLoginAction,
             Notification::route('mail', 'int@example.com')
         );
 
-        $this->assertTrue(ActionOtp::to('12345')->withChallenge($send->challenge)->verify('482913')->ok());
+        $this->assertTrue(ActionOtp::to('12345')->withChallenge($send->challenge)->verify(self::CODE)->ok());
     }
 
     public function test_result_to_array_contains_the_challenge(): void
     {
-        $send = ActionOtp::to('array@example.com')->send(
-            new ConfirmLoginAction,
-            Notification::route('mail', 'array@example.com')
-        );
+        $send = $this->sendCode('array@example.com');
 
         $this->assertSame(
             ['status' => 'sent', 'message' => 'We sent a verification code.', 'payload' => null, 'challenge' => $send->challenge],
